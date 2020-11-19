@@ -269,6 +269,7 @@ static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 	struct port *p;
 	int cnt, err;
 	double rr;
+	Integer64 corr;
 
 	clock_gettime(CLOCK_MONOTONIC, &msg->ts.host);
 
@@ -277,12 +278,21 @@ static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 		if (tc_blocked(q, p, msg)) {
 			continue;
 		}
+		if ((q->timestamping == TS_P2P1STEP) && (msg_type(msg) == SYNC)) {
+			corr = tmv_to_TimeInterval(q->peer_delay);
+			corr += q->asymmetry;
+			msg->header.correction += host2net64(corr);
+		}
 		cnt = transport_send(p->trp, &p->fda, TRANS_DEFER_EVENT, msg);
 		if (cnt <= 0) {
 			pr_err("failed to forward event from %s to %s",
 				q->log_name, p->log_name);
 			port_dispatch(p, EV_FAULT_DETECTED, 0);
 		}
+	}
+
+	if (q->timestamping >= TS_ONESTEP) {
+		goto onestep;
 	}
 
 	/* Go back and gather the transmit time stamps. */
@@ -307,6 +317,7 @@ static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 		tc_complete(q, p, msg, residence);
 	}
 
+ onestep:
 	return 0;
 }
 
@@ -435,6 +446,13 @@ int tc_fwd_response(struct port *q, struct ptp_message *msg)
 		if (tc_blocked(q, p, msg)) {
 			continue;
 		}
+		if (p->timestamping == TS_ONESTEP) {
+			if ((transport_send(p->trp, &p->fda, TRANS_GENERAL, msg)) <= 0) {
+				pr_err("tc failed to forward response on port %d", portnum(p));
+				port_dispatch(p, EV_FAULT_DETECTED, 0);
+			}
+			continue;
+		}
 		tc_complete(q, p, msg, tmv_zero());
 	}
 	return 0;
@@ -444,6 +462,9 @@ int tc_fwd_sync(struct port *q, struct ptp_message *msg)
 {
 	struct ptp_message *fup = NULL;
 	int err;
+
+	if (q->timestamping >= TS_ONESTEP)
+		goto onestep;
 
 	if (one_step(msg)) {
 		fup = msg_allocate();
@@ -460,6 +481,8 @@ int tc_fwd_sync(struct port *q, struct ptp_message *msg)
 		fup->follow_up.preciseOriginTimestamp = msg->sync.originTimestamp;
 		msg->header.flagField[0]      |= TWO_STEP;
 	}
+
+ onestep:
 	err = tc_fwd_event(q, msg);
 	if (err) {
 		return err;
