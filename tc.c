@@ -278,7 +278,7 @@ static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 		if (tc_blocked(q, p, msg)) {
 			continue;
 		}
-		if ((q->timestamping == TS_P2P1STEP) && (msg_type(msg) == SYNC)) {
+		if ((q->timestamping >= TS_ONESTEP) && (msg_type(msg) == SYNC)) {
 			corr = tmv_to_TimeInterval(q->peer_delay);
 			corr += q->asymmetry;
 			msg->header.correction += host2net64(corr);

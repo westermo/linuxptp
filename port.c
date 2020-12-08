@@ -2048,8 +2048,10 @@ int process_pdelay_req(struct port *p, struct ptp_message *m)
 	case TS_SOFTWARE:
 	case TS_LEGACY_HW:
 	case TS_HARDWARE:
-	case TS_ONESTEP:
 		event = TRANS_EVENT;
+		break;
+	case TS_ONESTEP:
+		event = TRANS_ONESTEP;
 		break;
 	case TS_P2P1STEP:
 		event = TRANS_P2P1STEP;
@@ -2109,7 +2111,7 @@ int process_pdelay_req(struct port *p, struct ptp_message *m)
 	 * NB - We do not have any fraction nanoseconds for the correction
 	 * fields, neither in the response or the follow up.
 	 */
-	if (p->timestamping == TS_P2P1STEP) {
+	if (p->timestamping >= TS_ONESTEP) {
 		rsp->header.correction = m->header.correction;
 		rsp->header.correction += p->tx_timestamp_offset;
 		rsp->header.correction += p->rx_timestamp_offset;
@@ -2130,7 +2132,7 @@ int process_pdelay_req(struct port *p, struct ptp_message *m)
 		pr_err("port %hu: send peer delay response failed", portnum(p));
 		goto out;
 	}
-	if (p->timestamping == TS_P2P1STEP) {
+	if (p->timestamping == TS_P2P1STEP || p->timestamping == TS_ONESTEP) {
 		goto out;
 	} else if (msg_sots_missing(rsp)) {
 		pr_err("missing timestamp on transmitted peer delay response");
@@ -2706,7 +2708,7 @@ static enum fsm_event bc_event(struct port *p, int fd_index)
 		return EV_NONE;
 	}
 	if (msg_sots_missing(msg) &&
-	    !(p->timestamping == TS_P2P1STEP && msg_type(msg) == PDELAY_REQ)) {
+	    !(p->timestamping >= TS_ONESTEP && msg_type(msg) == PDELAY_REQ)) {
 		pr_err("port %hu: received %s without timestamp",
 		       portnum(p), msg_type_string(msg_type(msg)));
 		msg_put(msg);
