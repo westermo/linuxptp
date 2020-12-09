@@ -367,4 +367,13 @@ void clock_check_ts(struct clock *c, uint64_t ts);
  */
 double clock_rate_ratio(struct clock *c);
 
+/* Westermo modifications */
+enum ptp_mode {
+        PTP_NONE = 0,
+        PTP_OC_MASTER = 3,
+        PTP_OC_SLAVE,
+        PTP_TC_MASTER,
+        PTP_TC_SLAVE
+};
+
 #endif

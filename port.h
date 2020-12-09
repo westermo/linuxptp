@@ -121,6 +121,13 @@ int port_prepare_and_send(struct port *p, struct ptp_message *msg,
 struct PortIdentity port_identity(struct port *p);
 
 /**
+ * Obtain a port's interface.
+ * @param p        A pointer previously obtained via port_open().
+ * @return         The port interface of 'p'.
+ */
+struct interface * port_interface(struct port *p);
+
+/**
  * Obtain a port number.
  * @param p        A port instance.
  * @return         The port number of 'p'.

@@ -2813,6 +2813,11 @@ struct PortIdentity port_identity(struct port *p)
 	return p->portIdentity;
 }
 
+struct interface * port_interface(struct port *p)
+{
+	return p->iface;
+}
+
 int port_number(struct port *p)
 {
 	return portnum(p);
