@@ -24,6 +24,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/queue.h>
+#include <linux/sockios.h>
 
 #include "address.h"
 #include "bmc.h"
@@ -44,6 +45,8 @@
 #include "tsproc.h"
 #include "uds.h"
 #include "util.h"
+
+static int config_mode(struct clock *c, struct port *p); /* Westermo modification. */
 
 #define N_CLOCK_PFD (N_POLLFD + 1) /* one extra per port, for the fault timer */
 #define POW2_41 ((double)(1ULL << 41))
@@ -1205,6 +1208,10 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 
 	LIST_FOREACH(p, &c->ports, list) {
 		port_dispatch(p, EV_INITIALIZE, 0);
+		if (config_mode(c, p)) {
+			pr_err("failed to communication with the driver");
+			return NULL;
+		}
 	}
 	port_dispatch(c->uds_port, EV_INITIALIZE, 0);
 
@@ -1937,4 +1944,80 @@ struct servo *clock_servo(struct clock *c)
 enum servo_state clock_servo_state(struct clock *c)
 {
 	return c->servo_state;
+}
+
+/* Westermo modifications */
+static void init_ifreq(struct ifreq *ifreq, struct hwtstamp_config *cfg,
+	const char *device)
+{
+	memset(ifreq, 0, sizeof(*ifreq));
+	memset(cfg, 0, sizeof(*cfg));
+
+	strncpy(ifreq->ifr_name, device, sizeof(ifreq->ifr_name) - 1);
+
+	ifreq->ifr_data = (void *) cfg;
+}
+
+static int config_mode(struct clock *c, struct port *p)
+{
+	struct ifreq ifreq;
+	struct hwtstamp_config cfg;
+	int rx_filter = 0;
+	int tx_type = 2;
+	int err = 0;
+	int fd = 0;
+	struct fdarray *fda;
+	struct interface *iface;
+	static int last_port = 0;
+
+	fda = port_fda(p);
+	iface = port_interface(p);
+	fd = fda->fd[FD_EVENT];
+
+	switch (c->type) {
+	case CLOCK_TYPE_ORDINARY:
+		if (c->dds.flags == DDS_SLAVE_ONLY)
+		{
+			pr_info("%s fd=%d. SLAVE_ONLY iface=%s\n",__func__, fd, interface_name(iface));
+			rx_filter = PTP_OC_SLAVE;
+		} else {
+			pr_info("%s fd=%d. MASTER iface=%s\n",__func__, fd, interface_name(iface));
+			rx_filter = PTP_OC_MASTER;
+		}
+		break;
+	case CLOCK_TYPE_P2P:
+		if (last_port) {
+			rx_filter = PTP_TC_SLAVE;
+			pr_info("%s fd=%d. TC-P2P SLAVE iface=%s\n",__func__, fd, interface_name(iface));
+			last_port = 0;
+		} else {
+			rx_filter = PTP_TC_MASTER;
+			pr_info("%s fd=%d. TC-P2P MASTER iface=%s\n",__func__, fd, interface_name(iface));
+			last_port = 1;
+		}
+		break;
+	case CLOCK_TYPE_E2E:
+		if (last_port) {
+			rx_filter = PTP_TC_SLAVE;
+			pr_info("%s fd=%d. TC-E2E SLAVE iface=%s\n",__func__, fd, interface_name(iface));
+			last_port = 0;
+		} else {
+			rx_filter = PTP_TC_MASTER;
+			pr_info("%s fd=%d. TC-E2E MASTER iface=%s\n",__func__, fd, interface_name(iface));
+			last_port = 1;
+		}
+		break;
+	default:
+		break;
+	}
+
+	init_ifreq(&ifreq, &cfg, interface_name(iface));
+	cfg.tx_type   = tx_type;
+	cfg.rx_filter = rx_filter;
+	err = ioctl(fd, SIOCSHWTSTAMP, &ifreq);
+	pr_debug("ioctl=%d tx=%d rx=%d\n", err, tx_type, rx_filter);
+	if (err < 0) {
+		pr_info("driver rejected the HWTSTAMP filter");
+	}
+	return err;
 }
