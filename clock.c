@@ -1973,37 +1973,37 @@ static int config_mode(struct clock *c, struct port *p)
 	fda = port_fda(p);
 	iface = port_interface(p);
 	fd = fda->fd[FD_EVENT];
-	pr_info("%s fd=%d. iface=%s\n",__func__, fd, interface_name(iface));
 
 	switch (c->type) {
 	case CLOCK_TYPE_ORDINARY:
-		pr_debug("%s OC\n",__func__);
 		if (c->dds.flags == DDS_SLAVE_ONLY)
 		{
-			pr_debug("%s SLAVE_ONLY\n",__func__);
+			pr_info("%s fd=%d. SLAVE_ONLY iface=%s\n",__func__, fd, interface_name(iface));
 			rx_filter = PTP_OC_SLAVE;
 		} else {
-			pr_debug("%s MASTER\n",__func__);
+			pr_info("%s fd=%d. MASTER iface=%s\n",__func__, fd, interface_name(iface));
 			rx_filter = PTP_OC_MASTER;
 		}
 		break;
 	case CLOCK_TYPE_P2P:
-		pr_debug("%s TC-P2P\n",__func__);
 		if (last_port) {
 			rx_filter = PTP_TC_SLAVE;
+			pr_info("%s fd=%d. TC-P2P SLAVE iface=%s\n",__func__, fd, interface_name(iface));
 			last_port = 0;
 		} else {
 			rx_filter = PTP_TC_MASTER;
+			pr_info("%s fd=%d. TC-P2P MASTER iface=%s\n",__func__, fd, interface_name(iface));
 			last_port = 1;
 		}
 		break;
 	case CLOCK_TYPE_E2E:
-		pr_debug("%s TC-E2E\n",__func__);
 		if (last_port) {
 			rx_filter = PTP_TC_SLAVE;
+			pr_info("%s fd=%d. TC-E2E SLAVE iface=%s\n",__func__, fd, interface_name(iface));
 			last_port = 0;
 		} else {
 			rx_filter = PTP_TC_MASTER;
+			pr_info("%s fd=%d. TC-E2E MASTER iface=%s\n",__func__, fd, interface_name(iface));
 			last_port = 1;
 		}
 		break;
