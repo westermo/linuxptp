@@ -1061,6 +1061,10 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 		return NULL;
 	}
 	if (config_set_section_int(config, interface_name(c->udsif),
+				   "tc_port_mode", TC_PORT_MASTER)) {
+		return NULL;
+	}
+	if (config_set_section_int(config, interface_name(c->udsif),
 				   "delay_filter_length", 1)) {
 		return NULL;
 	}
@@ -1968,7 +1972,6 @@ static int config_mode(struct clock *c, struct port *p)
 	int fd = 0;
 	struct fdarray *fda;
 	struct interface *iface;
-	static int last_port = 0;
 
 	fda = port_fda(p);
 	iface = port_interface(p);
@@ -1986,25 +1989,21 @@ static int config_mode(struct clock *c, struct port *p)
 		}
 		break;
 	case CLOCK_TYPE_P2P:
-		if (last_port) {
+		if (config_get_int(c->config, interface_name(iface), "tc_port_mode")) {
 			rx_filter = PTP_TC_SLAVE;
 			pr_info("%s fd=%d. TC-P2P SLAVE iface=%s\n",__func__, fd, interface_name(iface));
-			last_port = 0;
 		} else {
 			rx_filter = PTP_TC_MASTER;
 			pr_info("%s fd=%d. TC-P2P MASTER iface=%s\n",__func__, fd, interface_name(iface));
-			last_port = 1;
 		}
 		break;
 	case CLOCK_TYPE_E2E:
-		if (last_port) {
+		if (config_get_int(c->config, interface_name(iface), "tc_port_mode")) {
 			rx_filter = PTP_TC_SLAVE;
 			pr_info("%s fd=%d. TC-E2E SLAVE iface=%s\n",__func__, fd, interface_name(iface));
-			last_port = 0;
 		} else {
 			rx_filter = PTP_TC_MASTER;
 			pr_info("%s fd=%d. TC-E2E MASTER iface=%s\n",__func__, fd, interface_name(iface));
-			last_port = 1;
 		}
 		break;
 	default:

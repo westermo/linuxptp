@@ -184,6 +184,12 @@ static struct config_enum hwts_filter_enu[] = {
 	{ NULL, 0 },
 };
 
+static struct config_enum  tc_port_mode_enu[] = {
+	{ "master", TC_PORT_MASTER },
+	{ "slave", TC_PORT_SLAVE},
+	{ NULL, 0 },
+};
+
 static struct config_enum nw_trans_enu[] = {
 	{ "L2",    TRANS_IEEE_802_3 },
 	{ "UDPv4", TRANS_UDP_IPV4   },
@@ -275,6 +281,7 @@ struct config_item config_tab[] = {
 	PORT_ITEM_INT("msg_interval_request", 0, 0, 1),
 	PORT_ITEM_INT("neighborPropDelayThresh", 20000000, 0, INT_MAX),
 	PORT_ITEM_INT("net_sync_monitor", 0, 0, 1),
+	PORT_ITEM_ENU("tc_port_mode", TC_PORT_MASTER, tc_port_mode_enu),
 	PORT_ITEM_ENU("network_transport", TRANS_UDP_IPV4, nw_trans_enu),
 	GLOB_ITEM_INT("ntpshm_segment", 0, INT_MIN, INT_MAX),
 	GLOB_ITEM_INT("offsetScaledLogVariance", 0xffff, 0, UINT16_MAX),
