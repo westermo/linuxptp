@@ -376,4 +376,9 @@ enum ptp_mode {
         PTP_TC_SLAVE
 };
 
+enum tc_port_mode {
+	TC_PORT_MASTER = 0,
+	TC_PORT_SLAVE,
+};
+
 #endif
