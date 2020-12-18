@@ -2113,6 +2113,7 @@ int process_pdelay_req(struct port *p, struct ptp_message *m)
 		rsp->header.correction = m->header.correction;
 		rsp->header.correction += p->tx_timestamp_offset;
 		rsp->header.correction += p->rx_timestamp_offset;
+		rsp->header.reserved2  = m->header.reserved2;
 	} else {
 		rsp->header.flagField[0] |= TWO_STEP;
 		rsp->pdelay_resp.requestReceiptTimestamp =
