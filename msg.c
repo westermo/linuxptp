@@ -86,6 +86,7 @@ static int hdr_post_recv(struct ptp_header *m)
 	m->correction = net2host64(m->correction);
 	m->sourcePortIdentity.portNumber = ntohs(m->sourcePortIdentity.portNumber);
 	m->sequenceId = ntohs(m->sequenceId);
+	m->reserved2 = ntohl(m->reserved2);
 	return 0;
 }
 
@@ -95,6 +96,7 @@ static int hdr_pre_send(struct ptp_header *m)
 	m->correction = host2net64(m->correction);
 	m->sourcePortIdentity.portNumber = htons(m->sourcePortIdentity.portNumber);
 	m->sequenceId = htons(m->sequenceId);
+	m->reserved2 = htonl(m->reserved2);
 	return 0;
 }
 
