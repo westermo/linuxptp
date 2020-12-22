@@ -1979,7 +1979,7 @@ static int config_mode(struct clock *c, struct port *p)
 
 	switch (c->type) {
 	case CLOCK_TYPE_ORDINARY:
-		if (c->dds.flags == DDS_SLAVE_ONLY)
+		if (c->dds.flags & DDS_SLAVE_ONLY)
 		{
 			pr_info("%s fd=%d. SLAVE_ONLY iface=%s\n",__func__, fd, interface_name(iface));
 			rx_filter = PTP_OC_SLAVE;
