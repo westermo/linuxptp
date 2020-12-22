@@ -1967,7 +1967,7 @@ static int config_mode(struct clock *c, struct port *p)
 	struct ifreq ifreq;
 	struct hwtstamp_config cfg;
 	int rx_filter = 0;
-	int tx_type = 2;
+	int tx_type = 0;
 	int err = 0;
 	int fd = 0;
 	struct fdarray *fda;
@@ -1976,6 +1976,24 @@ static int config_mode(struct clock *c, struct port *p)
 	fda = port_fda(p);
 	iface = port_interface(p);
 	fd = fda->fd[FD_EVENT];
+
+	switch (c->timestamping) {
+		case TS_SOFTWARE:
+			tx_type = HWTSTAMP_TX_OFF;
+			break;
+		case TS_HARDWARE:
+		case TS_LEGACY_HW:
+			tx_type = HWTSTAMP_TX_OFF;
+			break;
+		case TS_ONESTEP:
+			tx_type = HWTSTAMP_TX_ONESTEP_SYNC;
+			break;
+		case TS_P2P1STEP:
+			tx_type = HWTSTAMP_TX_ONESTEP_P2P;
+			break;
+		default:
+			break;
+	}
 
 	switch (c->type) {
 	case CLOCK_TYPE_ORDINARY:
