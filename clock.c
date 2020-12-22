@@ -1983,7 +1983,7 @@ static int config_mode(struct clock *c, struct port *p)
 			break;
 		case TS_HARDWARE:
 		case TS_LEGACY_HW:
-			tx_type = HWTSTAMP_TX_OFF;
+			tx_type = HWTSTAMP_TX_ON;
 			break;
 		case TS_ONESTEP:
 			tx_type = HWTSTAMP_TX_ONESTEP_SYNC;
