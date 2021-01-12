@@ -1212,12 +1212,10 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 
 	LIST_FOREACH(p, &c->ports, list) {
 		port_dispatch(p, EV_INITIALIZE, 0);
-#if defined(CONFIG_DEFAULTS_DAGGER)
 		if (config_mode(c, p)) {
 			pr_err("failed to communication with the driver");
 			return NULL;
 		}
-#endif
 	}
 	port_dispatch(c->uds_port, EV_INITIALIZE, 0);
 
