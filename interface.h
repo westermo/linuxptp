@@ -91,4 +91,12 @@ bool interface_tsinfo_valid(struct interface *iface);
  */
 bool interface_tsmodes_supported(struct interface *iface, int modes);
 
+/**
+ * Tests whenever an interface supports onestep.
+ * @param iface  The interface of interest.
+ * @param tx_type bit mask.
+ * @return        supported tx_types, -1 otherwise.
+ */
+int interface_tsinfo_tx_type(struct interface *iface, int tx_type);
+
 #endif

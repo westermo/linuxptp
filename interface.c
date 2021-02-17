@@ -76,3 +76,11 @@ bool interface_tsmodes_supported(struct interface *iface, int modes)
 	}
 	return false;
 }
+
+int interface_tsinfo_tx_type(struct interface *iface, int tx_type)
+{
+	if (iface->ts_info.tx_types)
+		return iface->ts_info.tx_types & tx_type;
+	else
+		return -1;
+}

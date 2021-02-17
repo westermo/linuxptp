@@ -370,10 +370,8 @@ double clock_rate_ratio(struct clock *c);
 /* Westermo modifications */
 enum ptp_mode {
         PTP_NONE = 0,
-        PTP_OC_MASTER = 3,
-        PTP_OC_SLAVE,
-        PTP_TC_MASTER,
-        PTP_TC_SLAVE
+        PTP_OC = 3,
+        PTP_TC,
 };
 
 enum tc_port_mode {

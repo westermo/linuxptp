@@ -1977,6 +1977,10 @@ static int config_mode(struct clock *c, struct port *p)
 	iface = port_interface(p);
 	fd = fda->fd[FD_EVENT];
 
+
+	if (interface_tsinfo_tx_type(iface, HWTSTAMP_TX_ONESTEP_SYNC) == 0)
+		return 0; // Return if not ONESTEP is supported
+
 	switch (c->timestamping) {
 		case TS_SOFTWARE:
 			tx_type = HWTSTAMP_TX_OFF;
@@ -1997,32 +2001,13 @@ static int config_mode(struct clock *c, struct port *p)
 
 	switch (c->type) {
 	case CLOCK_TYPE_ORDINARY:
-		if (c->dds.flags & DDS_SLAVE_ONLY)
-		{
-			pr_info("%s fd=%d. SLAVE_ONLY iface=%s\n",__func__, fd, interface_name(iface));
-			rx_filter = PTP_OC_SLAVE;
-		} else {
-			pr_info("%s fd=%d. MASTER iface=%s\n",__func__, fd, interface_name(iface));
-			rx_filter = PTP_OC_MASTER;
-		}
+		pr_info("PTP_OC iface=%s (%d)\n", interface_name(iface), fd);
+		rx_filter = PTP_OC;
 		break;
 	case CLOCK_TYPE_P2P:
-		if (config_get_int(c->config, interface_name(iface), "tc_port_mode")) {
-			rx_filter = PTP_TC_SLAVE;
-			pr_info("%s fd=%d. TC-P2P SLAVE iface=%s\n",__func__, fd, interface_name(iface));
-		} else {
-			rx_filter = PTP_TC_MASTER;
-			pr_info("%s fd=%d. TC-P2P MASTER iface=%s\n",__func__, fd, interface_name(iface));
-		}
-		break;
 	case CLOCK_TYPE_E2E:
-		if (config_get_int(c->config, interface_name(iface), "tc_port_mode")) {
-			rx_filter = PTP_TC_SLAVE;
-			pr_info("%s fd=%d. TC-E2E SLAVE iface=%s\n",__func__, fd, interface_name(iface));
-		} else {
-			rx_filter = PTP_TC_MASTER;
-			pr_info("%s fd=%d. TC-E2E MASTER iface=%s\n",__func__, fd, interface_name(iface));
-		}
+		pr_info("PTP-TC iface=%s (%d)\n", interface_name(iface), fd);
+		rx_filter = PTP_TC;
 		break;
 	default:
 		break;
