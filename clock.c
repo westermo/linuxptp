@@ -1978,7 +1978,7 @@ static int config_mode(struct clock *c, struct port *p)
 	fd = fda->fd[FD_EVENT];
 
 
-	if (interface_tsinfo_tx_type(iface, HWTSTAMP_TX_ONESTEP_SYNC) == 0)
+	if (interface_tsinfo_tx_type(iface, (1 << HWTSTAMP_TX_ONESTEP_SYNC)) == 0)
 		return 0; // Return if not ONESTEP is supported
 
 	switch (c->timestamping) {
