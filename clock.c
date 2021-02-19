@@ -1969,6 +1969,7 @@ static int config_mode(struct clock *c, struct port *p)
 	int rx_filter = 0;
 	int tx_type = 0;
 	int err = 0;
+	int ret = 0;
 	int fd = 0;
 	struct fdarray *fda;
 	struct interface *iface;
@@ -1977,9 +1978,16 @@ static int config_mode(struct clock *c, struct port *p)
 	iface = port_interface(p);
 	fd = fda->fd[FD_EVENT];
 
-
-	if (interface_tsinfo_tx_type(iface, (1 << HWTSTAMP_TX_ONESTEP_SYNC)) == 0)
-		return 0; // Return if not ONESTEP is supported
+	/* If we do not support onestep sync we assume we are on the Dagger
+	 * platform.
+	 *
+	 * If we do not support hardware timestamping whatsoever,
+	 * skip configuring the driver, as we are likely running virtualized */
+	ret = interface_tsinfo_tx_type(iface, (1 << HWTSTAMP_TX_ONESTEP_SYNC));
+	if (ret == 0)
+		return 0;
+	else if (ret < 0)
+		return 0;
 
 	switch (c->timestamping) {
 		case TS_SOFTWARE:
