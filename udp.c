@@ -157,6 +157,7 @@ static int udp_open(struct transport *t, struct interface *iface,
 	const char *name = interface_name(iface);
 	uint8_t event_dscp, general_dscp;
 	int efd, gfd, ttl;
+	enum clock_type clk_type;
 
 	ttl = config_get_int(t->cfg, name, "udp_ttl");
 	udp->mac.len = 0;
@@ -179,7 +180,8 @@ static int udp_open(struct transport *t, struct interface *iface,
 	if (gfd < 0)
 		goto no_general;
 
-	if (sk_timestamping_init(efd, interface_label(iface), ts_type, TRANS_UDP_IPV4,
+	clk_type = config_get_int(t->cfg, NULL, "hwtstamp_clk_type");
+	if (sk_timestamping_init(efd, interface_label(iface), clk_type, ts_type, TRANS_UDP_IPV4,
 				 interface_get_vclock(iface)))
 		goto no_timestamping;
 

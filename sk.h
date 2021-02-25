@@ -150,13 +150,15 @@ int sk_set_priority(int fd, int family, uint8_t dscp);
  * Enable time stamping on a given network interface.
  * @param fd          An open socket.
  * @param device      The name of the network interface to configure.
+ * @param clk_type    The type of PTP clock clock.
  * @param type        The requested flavor of time stamping.
  * @param transport   The type of transport used.
  * @param vclock      Index of the virtual PHC, or -1 for the physical clock.
  * @return            Zero on success, non-zero otherwise.
  */
-int sk_timestamping_init(int fd, const char *device, enum timestamp_type type,
-			 enum transport_type transport, int vclock);
+int sk_timestamping_init(int fd, const char *device, int clk_type,
+			 enum timestamp_type type, enum transport_type transport,
+			 int vclock);
 
 /**
  * Limits the time that RECVMSG(2) will poll while waiting for the tx timestamp
