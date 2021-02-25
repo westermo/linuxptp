@@ -31,6 +31,7 @@
 #include "transport.h"
 #include "servo.h"
 #include "sk.h"
+#include "clock.h"
 
 struct config {
 	/* configured interfaces */
