@@ -322,6 +322,7 @@ static int raw_open(struct transport *t, struct interface *iface,
 	int efd, gfd, socket_priority;
 	const char *name;
 	char *str;
+	enum clock_type clk_type;
 
 	name = interface_label(iface);
 	str = config_get_string(t->cfg, name, "ptp_dst_mac");
@@ -350,7 +351,8 @@ static int raw_open(struct transport *t, struct interface *iface,
 	if (gfd < 0)
 		goto no_general;
 
-	if (sk_timestamping_init(efd, name, ts_type, TRANS_IEEE_802_3,
+	clk_type = config_get_int(t->cfg, NULL, "hwtstamp_clk_type");
+	if (sk_timestamping_init(efd, name, clk_type, ts_type, TRANS_IEEE_802_3,
 				 interface_get_vclock(iface)))
 		goto no_timestamping;
 
