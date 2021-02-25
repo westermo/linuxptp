@@ -19,7 +19,7 @@
  */
 #include <errno.h>
 #include <time.h>
-#include <linux/net_tstamp.h>
+#include "net_tstamp_cpy.h"
 #include <linux/sockios.h>
 #include <linux/ethtool.h>
 #include <net/if.h>
