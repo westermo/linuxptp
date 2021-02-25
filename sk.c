@@ -57,7 +57,7 @@ static void init_ifreq(struct ifreq *ifreq, struct hwtstamp_config *cfg,
 }
 
 static int hwts_init(int fd, const char *device, int rx_filter,
-	int rx_filter2, int tx_type)
+	int rx_filter2, int clk_type, int tx_type)
 {
 	struct ifreq ifreq;
 	struct hwtstamp_config cfg;
@@ -77,6 +77,7 @@ static int hwts_init(int fd, const char *device, int rx_filter,
 	case HWTS_FILTER_FULL:
 		cfg.tx_type   = tx_type;
 		cfg.rx_filter = HWTSTAMP_FILTER_ALL;
+		cfg.clk_type  = clk_type;
 		err = ioctl(fd, SIOCSHWTSTAMP, &ifreq);
 		if (err < 0) {
 			pr_err("ioctl SIOCSHWTSTAMP failed: %m");
@@ -86,6 +87,7 @@ static int hwts_init(int fd, const char *device, int rx_filter,
 	case HWTS_FILTER_NORMAL:
 		cfg.tx_type   = tx_type;
 		cfg.rx_filter = orig_rx_filter = rx_filter;
+		cfg.clk_type  = clk_type;
 		err = ioctl(fd, SIOCSHWTSTAMP, &ifreq);
 		if (err < 0) {
 			pr_info("driver rejected most general HWTSTAMP filter");
@@ -446,8 +448,8 @@ int sk_set_priority(int fd, int family, uint8_t dscp)
 	return 0;
 }
 
-int sk_timestamping_init(int fd, const char *device, enum timestamp_type type,
-			 enum transport_type transport)
+int sk_timestamping_init(int fd, const char *device, int clk_type,
+			 enum timestamp_type type, enum transport_type transport)
 {
 	int err, filter1, filter2 = 0, flags, tx_type = HWTSTAMP_TX_ON;
 
@@ -504,7 +506,7 @@ int sk_timestamping_init(int fd, const char *device, enum timestamp_type type,
 		case TRANS_UDS:
 			return -1;
 		}
-		err = hwts_init(fd, device, filter1, filter2, tx_type);
+		err = hwts_init(fd, device, filter1, filter2, clk_type, tx_type);
 		if (err)
 			return err;
 	}
