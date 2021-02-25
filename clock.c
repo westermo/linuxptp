@@ -46,7 +46,6 @@
 #include "uds.h"
 #include "util.h"
 
-static int config_mode(struct clock *c, struct port *p); /* Westermo modification. */
 
 #define N_CLOCK_PFD (N_POLLFD + 1) /* one extra per port, for the fault timer */
 #define POW2_41 ((double)(1ULL << 41))
@@ -1212,10 +1211,6 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 
 	LIST_FOREACH(p, &c->ports, list) {
 		port_dispatch(p, EV_INITIALIZE, 0);
-		if (config_mode(c, p)) {
-			pr_err("failed to communication with the driver");
-			return NULL;
-		}
 	}
 	port_dispatch(c->uds_port, EV_INITIALIZE, 0);
 
@@ -1948,86 +1943,4 @@ struct servo *clock_servo(struct clock *c)
 enum servo_state clock_servo_state(struct clock *c)
 {
 	return c->servo_state;
-}
-
-/* Westermo modifications */
-static void init_ifreq(struct ifreq *ifreq, struct hwtstamp_config *cfg,
-	const char *device)
-{
-	memset(ifreq, 0, sizeof(*ifreq));
-	memset(cfg, 0, sizeof(*cfg));
-
-	strncpy(ifreq->ifr_name, device, sizeof(ifreq->ifr_name) - 1);
-
-	ifreq->ifr_data = (void *) cfg;
-}
-
-static int config_mode(struct clock *c, struct port *p)
-{
-	struct ifreq ifreq;
-	struct hwtstamp_config cfg;
-	int rx_filter = 0;
-	int tx_type = 0;
-	int err = 0;
-	int ret = 0;
-	int fd = 0;
-	struct fdarray *fda;
-	struct interface *iface;
-
-	fda = port_fda(p);
-	iface = port_interface(p);
-	fd = fda->fd[FD_EVENT];
-
-	/* If we do not support onestep sync we assume we are on the Dagger
-	 * platform.
-	 *
-	 * If we do not support hardware timestamping whatsoever,
-	 * skip configuring the driver, as we are likely running virtualized */
-	ret = interface_tsinfo_tx_type(iface, (1 << HWTSTAMP_TX_ONESTEP_SYNC));
-	if (ret == 0)
-		return 0;
-	else if (ret < 0)
-		return 0;
-
-	switch (c->timestamping) {
-		case TS_SOFTWARE:
-			tx_type = HWTSTAMP_TX_OFF;
-			break;
-		case TS_HARDWARE:
-		case TS_LEGACY_HW:
-			tx_type = HWTSTAMP_TX_ON;
-			break;
-		case TS_ONESTEP:
-			tx_type = HWTSTAMP_TX_ONESTEP_SYNC;
-			break;
-		case TS_P2P1STEP:
-			tx_type = HWTSTAMP_TX_ONESTEP_P2P;
-			break;
-		default:
-			break;
-	}
-
-	switch (c->type) {
-	case CLOCK_TYPE_ORDINARY:
-		pr_info("PTP_OC iface=%s (%d)\n", interface_name(iface), fd);
-		rx_filter = PTP_OC;
-		break;
-	case CLOCK_TYPE_P2P:
-	case CLOCK_TYPE_E2E:
-		pr_info("PTP-TC iface=%s (%d)\n", interface_name(iface), fd);
-		rx_filter = PTP_TC;
-		break;
-	default:
-		break;
-	}
-
-	init_ifreq(&ifreq, &cfg, interface_name(iface));
-	cfg.tx_type   = tx_type;
-	cfg.rx_filter = rx_filter;
-	err = ioctl(fd, SIOCSHWTSTAMP, &ifreq);
-	pr_debug("ioctl=%d tx=%d rx=%d\n", err, tx_type, rx_filter);
-	if (err < 0) {
-		pr_info("driver rejected the HWTSTAMP filter");
-	}
-	return err;
 }
