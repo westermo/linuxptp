@@ -587,41 +587,40 @@ int sk_timestamping_init(int fd, const char *device, int clk_type,
 		return -1;
 	}
 
-	if (type != TS_SOFTWARE) {
-		filter1 = HWTSTAMP_FILTER_PTP_V2_EVENT;
-		switch (type) {
-		case TS_SOFTWARE:
-			tx_type = HWTSTAMP_TX_OFF;
-			break;
-		case TS_HARDWARE:
-		case TS_LEGACY_HW:
-			tx_type = HWTSTAMP_TX_ON;
-			break;
-		case TS_ONESTEP:
-			tx_type = HWTSTAMP_TX_ONESTEP_SYNC;
-			break;
-		case TS_P2P1STEP:
-			tx_type = HWTSTAMP_TX_ONESTEP_P2P;
-			break;
-		}
-		switch (transport) {
-		case TRANS_UDP_IPV4:
-		case TRANS_UDP_IPV6:
-			filter2 = HWTSTAMP_FILTER_PTP_V2_L4_EVENT;
-			break;
-		case TRANS_IEEE_802_3:
-			filter2 = HWTSTAMP_FILTER_PTP_V2_L2_EVENT;
-			break;
-		case TRANS_DEVICENET:
-		case TRANS_CONTROLNET:
-		case TRANS_PROFINET:
-		case TRANS_UDS:
-			return -1;
-		}
-		err = hwts_init(fd, device, filter1, filter2, clk_type, tx_type);
-		if (err)
-			return err;
+	filter1 = HWTSTAMP_FILTER_PTP_V2_EVENT;
+	switch (type) {
+	case TS_SOFTWARE:
+		tx_type = HWTSTAMP_TX_OFF;
+		break;
+	case TS_HARDWARE:
+	case TS_LEGACY_HW:
+		tx_type = HWTSTAMP_TX_ON;
+		break;
+	case TS_ONESTEP:
+		tx_type = HWTSTAMP_TX_ONESTEP_SYNC;
+		break;
+	case TS_P2P1STEP:
+		tx_type = HWTSTAMP_TX_ONESTEP_P2P;
+		break;
 	}
+	switch (transport) {
+	case TRANS_UDP_IPV4:
+	case TRANS_UDP_IPV6:
+		filter2 = HWTSTAMP_FILTER_PTP_V2_L4_EVENT;
+		break;
+	case TRANS_IEEE_802_3:
+		filter2 = HWTSTAMP_FILTER_PTP_V2_L2_EVENT;
+		break;
+	case TRANS_DEVICENET:
+	case TRANS_CONTROLNET:
+	case TRANS_PROFINET:
+	case TRANS_UDS:
+		return -1;
+	}
+
+	err = hwts_init(fd, device, filter1, filter2, clk_type, tx_type);
+	if (err && !(type == TS_SOFTWARE && errno == ENOTSUP))
+		return err;
 
 	if (vclock >= 0)
 		flags |= SOF_TIMESTAMPING_BIND_PHC;
