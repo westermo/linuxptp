@@ -52,7 +52,7 @@ enum {
  * @flags:	no flags defined right now, must be zero for %SIOCSHWTSTAMP
  * @tx_type:	one of HWTSTAMP_TX_*
  * @rx_filter:	one of HWTSTAMP_FILTER_*
- * @clk_mode    one of HWTSTAMP_MODE_*
+ * @clk_type    one of HWTSTAMP_CLOCK_TYPE_*
  *
  * %SIOCGHWTSTAMP and %SIOCSHWTSTAMP expect a &struct ifreq with a
  * ifr_data pointer to this structure.  For %SIOCSHWTSTAMP, if the
@@ -92,6 +92,14 @@ enum hwtstamp_tx_types {
 	 * queue.
 	 */
 	HWTSTAMP_TX_ONESTEP_SYNC,
+
+	/*
+	 * Same as HWTSTAMP_TX_ONESTEP_SYNC, but also enables time
+	 * stamp insertion directly into PDelay_Resp packets. In this
+	 * case, neither transmitted Sync nor PDelay_Resp packets will
+	 * receive a time stamp via the socket error queue.
+	 */
+	HWTSTAMP_TX_ONESTEP_P2P,
 };
 
 /* possible values for hwtstamp_config->rx_filter */
@@ -137,10 +145,11 @@ enum hwtstamp_rx_filters {
 };
 
 /* possible values for hwtstamp_config->tx_type */
-enum hwtstamp_clk_modes {
-	HWTSTAMP_MODE_NONE,
-	HWTSTAMP_MODE_TRANSPARENT_CLOCK,
-	HWTSTAMP_MODE_ORDINARY_CLOCK,
+enum hwtstamp_clk_types {
+	HWTSTAMP_CLOCK_TYPE_NONE,
+	HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK,
+	HWTSTAMP_CLOCK_TYPE_ORDINARY_CLOCK,
+	HWTSTAMP_CLOCK_TYPE_BOUNDARY_CLOCK,
 };
 
 /* SCM_TIMESTAMPING_PKTINFO control message */
