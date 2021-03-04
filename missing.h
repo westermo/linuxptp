@@ -56,12 +56,6 @@ enum _missing_hwtstamp_tx_types {
 };
 #endif
 
-#ifndef HAVE_ONESTEP_P2P
-enum {
-	HWTSTAMP_TX_ONESTEP_P2P = 3,
-};
-#endif
-
 #ifdef PTP_EXTTS_REQUEST2
 #define PTP_EXTTS_REQUEST_FAILED "PTP_EXTTS_REQUEST2 failed: %m"
 #else
