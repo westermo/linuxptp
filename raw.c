@@ -21,6 +21,7 @@
 #include <linux/filter.h>
 #include <linux/if_ether.h>
 #include <net/if.h>
+#include <net/ethernet.h>
 #include <netinet/in.h>
 #include <netpacket/packet.h>
 #include <stdbool.h>
@@ -53,7 +54,24 @@ struct raw {
 	struct address ptp_addr;
 	struct address p2p_addr;
 	int vlan;
+	int egress_vlan_tagged;
+	int egress_vlan_id;
+	int egress_vlan_prio;
 };
+
+/* Ethernet frame header including VLAN tag */
+struct tagged_frame_header {
+        struct ether_header ether_header;
+        u_int16_t vlan_tags;
+        u_int16_t enc_ethertype;
+} __attribute__((packed));
+
+#define OP_AND  (BPF_ALU | BPF_AND | BPF_K)
+#define OP_JEQ  (BPF_JMP | BPF_JEQ | BPF_K)
+#define OP_JUN  (BPF_JMP | BPF_JA)
+#define OP_LDB  (BPF_LD  | BPF_B   | BPF_ABS)
+#define OP_LDH  (BPF_LD  | BPF_H   | BPF_ABS)
+#define OP_RETK (BPF_RET | BPF_K)
 
 #define PTP_GEN_BIT 0x08 /* indicates general message, if set in message type */
 
@@ -335,6 +353,13 @@ static int raw_open(struct transport *t, struct interface *iface,
 		pr_err("invalid p2p_dst_mac %s", str);
 		return -1;
 	}
+
+	raw->egress_vlan_tagged = config_get_int(t->cfg, NULL, "egress_vlan.tagged");
+	if (raw->egress_vlan_tagged) {
+		raw->egress_vlan_id = config_get_int(t->cfg, NULL, "egress_vlan.id");
+		raw->egress_vlan_prio = config_get_int(t->cfg, NULL, "egress_vlan.prio");
+	}
+
 	mac_to_addr(&raw->ptp_addr, ptp_dst_mac);
 	mac_to_addr(&raw->p2p_addr, p2p_dst_mac);
 
@@ -421,6 +446,7 @@ static int raw_send(struct transport *t, struct fdarray *fda,
 	ssize_t cnt;
 	unsigned char pkt[1600], *ptr = buf;
 	struct eth_hdr *hdr;
+	struct tagged_frame_header *tag_hdr;
 	int fd = -1;
 
 	switch (event) {
@@ -435,17 +461,27 @@ static int raw_send(struct transport *t, struct fdarray *fda,
 		break;
 	}
 
-	ptr -= sizeof(*hdr);
-	len += sizeof(*hdr);
-
 	if (!addr)
 		addr = peer ? &raw->p2p_addr : &raw->ptp_addr;
 
-	hdr = (struct eth_hdr *) ptr;
-	addr_to_mac(&hdr->dst, addr);
-	addr_to_mac(&hdr->src, &raw->src_addr);
-
-	hdr->type = htons(ETH_P_1588);
+	/* To send frames with 802.1Q tag. */
+	if (raw->egress_vlan_tagged) {
+		ptr -= sizeof(*tag_hdr);
+		len += sizeof(*tag_hdr);
+		tag_hdr = (struct tagged_frame_header *) ptr;
+		addr_to_mac(&tag_hdr->ether_header.ether_dhost, addr);
+		addr_to_mac(&tag_hdr->ether_header.ether_shost, &raw->src_addr);
+		tag_hdr->ether_header.ether_type = htons(ETH_P_8021Q);
+		tag_hdr->vlan_tags = htons((raw->egress_vlan_prio << 13) | raw->egress_vlan_id);
+		tag_hdr->enc_ethertype = htons(ETH_P_1588);
+	} else {
+		ptr -= sizeof(*hdr);
+		len += sizeof(*hdr);
+		hdr = (struct eth_hdr *) ptr;
+		addr_to_mac(&hdr->dst, addr);
+		addr_to_mac(&hdr->src, &raw->src_addr);
+		hdr->type = htons(ETH_P_1588);
+	}
 
 	cnt = send(fd, ptr, len, 0);
 	if (cnt < 1) {
