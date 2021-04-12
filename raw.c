@@ -21,6 +21,7 @@
 #include <linux/filter.h>
 #include <linux/if_ether.h>
 #include <net/if.h>
+#include <net/ethernet.h>
 #include <netinet/in.h>
 #include <netpacket/packet.h>
 #include <stdio.h>
@@ -53,6 +54,13 @@ struct raw {
 	int vlan;
 };
 
+/* Ethernet frame header including VLAN tag */
+struct tagged_frame_header {
+        struct ether_header ether_header;
+        u_int16_t vlan_tags;
+        u_int16_t enc_ethertype;
+} __attribute__((packed));
+
 #define OP_AND  (BPF_ALU | BPF_AND | BPF_K)
 #define OP_JEQ  (BPF_JMP | BPF_JEQ | BPF_K)
 #define OP_JUN  (BPF_JMP | BPF_JA)
@@ -79,6 +87,11 @@ static struct sock_filter raw_filter[N_RAW_FILTER] = {
 	{OP_RETK, 0, 0, 1500        }, /*accept*/
 	{OP_RETK, 0, 0, 0           }, /*reject*/
 };
+
+// wnt profile params
+int profile_type = 0;
+int profile_prio = 4;
+int profile_vid = 0;
 
 static int raw_configure(int fd, int event, int index,
 			 unsigned char *addr1, unsigned char *addr2, int enable)
@@ -248,6 +261,13 @@ static int raw_open(struct transport *t, struct interface *iface,
 	if (sk_timestamping_init(efd, name, clk_type, ts_type, TRANS_IEEE_802_3))
 		goto no_timestamping;
 
+	profile_type = config_get_int(t->cfg, NULL, "profile_type");
+	if (profile_type) {
+		profile_vid = config_get_int(t->cfg, NULL, "profile_vid");
+		profile_prio = config_get_int(t->cfg, NULL, "profile_prio");
+		pr_info("profile = %d vid=%d prio=%d\n", profile_type, profile_vid, profile_prio);
+	}
+
 	if (sk_general_init(gfd))
 		goto no_timestamping;
 
@@ -310,6 +330,7 @@ static int raw_send(struct transport *t, struct fdarray *fda,
 	ssize_t cnt;
 	unsigned char pkt[1600], *ptr = buf;
 	struct eth_hdr *hdr;
+	struct tagged_frame_header *tag_hdr;
 	int fd = -1;
 
 	switch (event) {
@@ -324,17 +345,27 @@ static int raw_send(struct transport *t, struct fdarray *fda,
 		break;
 	}
 
-	ptr -= sizeof(*hdr);
-	len += sizeof(*hdr);
-
 	if (!addr)
 		addr = peer ? &raw->p2p_addr : &raw->ptp_addr;
 
-	hdr = (struct eth_hdr *) ptr;
-	addr_to_mac(&hdr->dst, addr);
-	addr_to_mac(&hdr->src, &raw->src_addr);
-
-	hdr->type = htons(ETH_P_1588);
+	/* The profile part is added by WNT.  To send frames with 802.1Q tag. */
+	if (profile_type == 1) {
+		ptr -= sizeof(*tag_hdr);
+		len += sizeof(*tag_hdr);
+		tag_hdr = (struct tagged_frame_header *) ptr;
+		addr_to_mac(&tag_hdr->ether_header.ether_dhost, addr);
+		addr_to_mac(&tag_hdr->ether_header.ether_shost, &raw->src_addr);
+		tag_hdr->ether_header.ether_type = htons(ETH_P_8021Q);
+		tag_hdr->vlan_tags = htons((profile_prio << 13) | profile_vid);
+		tag_hdr->enc_ethertype = htons(ETH_P_1588);
+	} else {
+		ptr -= sizeof(*hdr);
+		len += sizeof(*hdr);
+		hdr = (struct eth_hdr *) ptr;
+		addr_to_mac(&hdr->dst, addr);
+		addr_to_mac(&hdr->src, &raw->src_addr);
+		hdr->type = htons(ETH_P_1588);
+	}
 
 	cnt = send(fd, ptr, len, 0);
 	if (cnt < 1) {
