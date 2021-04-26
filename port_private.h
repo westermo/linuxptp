@@ -153,6 +153,7 @@ struct port {
 	int inhibit_multicast_service;
 	/* slave event monitoring */
 	struct monitor *slave_event_monitor;
+	int profile_type;
 };
 
 #define portnum(p) (p->portIdentity.portNumber)

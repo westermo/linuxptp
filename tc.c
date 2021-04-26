@@ -391,6 +391,80 @@ void tc_flush(struct port *q)
 	}
 }
 
+/* IEEE C37.238-2011. Update the network_time_inaccuracy (v1)  or total_time_inaccuracy (v2).*/
+int update_announce_tlv_inaccuracy(struct port *q, struct ptp_message *msg)
+{
+	unsigned char *p;
+	uint32_t inaccuracy = 0;
+	struct msg_c37_238_announce_tlv *e;
+
+	/* Check if announce packet in power V1 mode with extra TLVs */
+	if (msg_type(msg) == ANNOUNCE &&
+	    q->profile_type == POWER_PROFILE_V1 &&
+	    msg->announce.hdr.messageLength > 0x40) {
+		p = (unsigned char*)&msg->announce.timeSource;
+		p++;
+		if (p == NULL)
+			return -1;
+		e = (struct msg_c37_238_announce_tlv *) p;
+		pr_debug("%s type=%d sub=00%x\n",
+			 __func__, ntohs(e->type), e->subtype[2]);
+		if (ntohs(e->type) == 3 &&
+		    0 == memcmp(e->id, ieee_c37_238_id, sizeof(ieee_c37_238_id))) {
+			if (e->subtype[0] || e->subtype[1]) {
+				return 0;
+			}
+			switch (e->subtype[2]) {
+			case 1:
+				e->gm_id = ntohs(e->gm_id);
+				e->gm_time_inaccuracy = ntohl(e->gm_time_inaccuracy);
+				inaccuracy = ntohl(e->network_time_inaccuracy);
+				inaccuracy += (q->peerMeanPathDelay >> 16);
+				e->network_time_inaccuracy = htonl(inaccuracy);
+				pr_debug("%s egress inacc=0x%x\n", __func__, inaccuracy);
+				break;
+
+			default:
+				break;
+			}
+		}
+	}
+
+	/* Check if announce packet in power V2 mode with extra TLVs */
+	if (msg_type(msg) == ANNOUNCE &&
+	    q->profile_type == POWER_PROFILE_V2 &&
+	    msg->announce.hdr.messageLength > 0x40) {
+		p = (unsigned char*)&msg->announce.timeSource;
+		p++;
+		if (p == NULL)
+			return -1;
+		e = (struct msg_c37_238_announce_tlv *) p;
+		pr_debug("%s type=%d sub=00%x\n",
+			 __func__, ntohs(e->type), e->subtype[2]);
+		if (ntohs(e->type) == 3 &&
+		    0 == memcmp(e->id, ieee_c37_238_id, sizeof(ieee_c37_238_id))) {
+			if (e->subtype[0] || e->subtype[1]) {
+				return 0;
+			}
+			switch (e->subtype[2]) {
+			case 2:
+				e->gm_id = ntohs(e->gm_id);
+				inaccuracy = ntohl(e->network_time_inaccuracy);
+				inaccuracy += (q->peerMeanPathDelay >> 16);
+				/* For v2 this field is called total_time_inaccuracy, but it is on the same place
+					   as network_time_inaccuracy in v1.*/
+				e->network_time_inaccuracy = htonl(inaccuracy);
+				pr_debug("%s egress inacc=0x%x\n", __func__, inaccuracy);
+				break;
+
+			default:
+				break;
+			}
+		}
+	}
+	return 0;
+}
+
 int tc_forward(struct port *q, struct ptp_message *msg)
 {
 	uint16_t steps_removed;
@@ -401,6 +475,8 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 		steps_removed = ntohs(msg->announce.stepsRemoved);
 		msg->announce.stepsRemoved = htons(1 + steps_removed);
 	}
+
+	update_announce_tlv_inaccuracy(q, msg); /* update the announce tlv data */
 
 	for (p = clock_first_port(q->clock); p; p = LIST_NEXT(p, list)) {
 		if (tc_blocked(q, p, msg)) {

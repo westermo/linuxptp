@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "print.h"
 #include "port.h"
 #include "tlv.h"
 #include "msg.h"
@@ -35,6 +36,7 @@
 	(tlv->length < sizeof(struct type) - sizeof(struct TLV))
 
 uint8_t ieee8021_id[3] = { IEEE_802_1_COMMITTEE };
+uint8_t ieee_c37_238_id[3] = { IEEE_RAC_ORG_ID };
 
 static TAILQ_HEAD(tlv_pool, tlv_extra) tlv_pool =
 	TAILQ_HEAD_INITIALIZER(tlv_pool);
@@ -548,6 +550,7 @@ static void nsm_resp_pre_send(struct tlv_extra *extra)
 static int org_post_recv(struct organization_tlv *org)
 {
 	struct follow_up_info_tlv *f;
+	struct msg_c37_238_announce_tlv *e;
 
 	if (0 == memcmp(org->id, ieee8021_id, sizeof(ieee8021_id))) {
 		if (org->subtype[0] || org->subtype[1]) {
@@ -568,8 +571,33 @@ static int org_post_recv(struct organization_tlv *org)
 			if (org->length + sizeof(struct TLV) != sizeof(struct msg_interval_req_tlv))
 				goto bad_length;
 		}
+		return 0;
 	}
-	return 0;
+
+	if (0 == memcmp(org->id, ieee_c37_238_id, sizeof(ieee_c37_238_id))) {
+		if (org->subtype[0] || org->subtype[1]) {
+			return 0;
+		}
+		pr_debug("%s IEEE-C37-s23 subtype=%d\n", __func__, org->subtype[2]);
+		switch (org->subtype[2]) {
+		case 1:
+			if (org->length + sizeof(struct TLV) != sizeof(struct msg_c37_238_announce_tlv))
+				goto bad_length;
+			e = (struct msg_c37_238_announce_tlv *) org;
+			e->gm_id = ntohs(e->gm_id);
+			e->gm_time_inaccuracy = ntohl(e->gm_time_inaccuracy);
+			e->network_time_inaccuracy = ntohl(e->network_time_inaccuracy);
+			pr_debug("%s gm_id=%d gm_inacc=%d net_inacc=%d\n",
+				__func__, e->gm_id, e->gm_time_inaccuracy, e->network_time_inaccuracy);
+			break;
+
+		case 2:
+			if (org->length + sizeof(struct TLV) != sizeof(struct msg_interval_req_tlv))
+				goto bad_length;
+		}
+		return 0;
+	}
+
 bad_length:
 	return -EBADMSG;
 }
@@ -577,6 +605,7 @@ bad_length:
 static void org_pre_send(struct organization_tlv *org)
 {
 	struct follow_up_info_tlv *f;
+	struct msg_c37_238_announce_tlv *e;
 
 	if (0 == memcmp(org->id, ieee8021_id, sizeof(ieee8021_id))) {
 		if (org->subtype[0] || org->subtype[1]) {
@@ -592,6 +621,24 @@ static void org_pre_send(struct organization_tlv *org)
 			break;
 		}
 	}
+
+	if (0 == memcmp(org->id, ieee_c37_238_id, sizeof(ieee_c37_238_id))) {
+		if (org->subtype[0] || org->subtype[1]) {
+			return;
+		}
+		pr_debug("%s IEEE-C37-s23 subtype=%d\n", __func__, org->subtype[2]);
+		switch (org->subtype[2]) {
+		case 1:
+			e = (struct msg_c37_238_announce_tlv *) org;
+			e->gm_id = htons(e->gm_id);
+			e->gm_time_inaccuracy = htonl(e->gm_time_inaccuracy);
+			e->network_time_inaccuracy = htonl(e->network_time_inaccuracy);
+			pr_debug("%s gm_id=%d gm_inacc=%d net_inacc=%d\n",
+				__func__, e->gm_id, e->gm_time_inaccuracy, e->network_time_inaccuracy);
+			break;
+		}
+	}
+
 }
 
 static int slave_delay_timing_data_post_revc(struct tlv_extra *extra)

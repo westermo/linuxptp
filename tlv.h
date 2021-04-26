@@ -208,6 +208,10 @@ struct nsm_resp_tlv_foot {
 #define IEEE_802_1_COMMITTEE 0x00, 0x80, 0xC2
 extern uint8_t ieee8021_id[3];
 
+/* Handle the Power profile extension, IEEE C37.238-2011. */
+#define IEEE_RAC_ORG_ID 0x1C, 0x12, 0x9D
+extern uint8_t ieee_c37_238_id[3];
+
 struct organization_tlv {
 	Enumeration16 type;
 	UInteger16    length;
@@ -371,6 +375,32 @@ struct tlv_extra {
 		struct nsm_resp_tlv_foot *foot;
 	};
 };
+
+#define POWER_PROFILE_V1 1
+#define POWER_PROFILE_V2 2
+
+struct msg_c37_238_announce_tlv {
+	Enumeration16	type;
+	UInteger16		length;
+	Octet			id[3];
+	Octet			subtype[3];
+	UInteger16 		gm_id;
+	UInteger32		gm_time_inaccuracy;
+	UInteger32		network_time_inaccuracy;
+	Octet			reserved[2];
+} PACKED;
+
+struct msg_c37_238_alt_time_offset_tlv {
+	Enumeration16	type;
+	UInteger16		length;
+	Octet			key;
+	UInteger32		current_offset;
+	UInteger32 		jump_second;
+	Octet			time_of_next_jump[6];
+	Octet			display_name_len;
+	Octet			display_name[3];
+	Octet			pad;
+} PACKED;
 
 /**
  * Allocates a new tlv_extra structure.

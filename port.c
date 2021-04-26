@@ -55,6 +55,9 @@ enum syfu_event {
 	FUP_MATCH,
 };
 
+static int power_tlv_org_append(struct ptp_message *m);
+static int power_tlv_atoi_append(struct ptp_message *m);
+
 static int port_is_ieee8021as(struct port *p);
 static void port_nrate_initialize(struct port *p);
 
@@ -1483,6 +1486,12 @@ int port_tx_announce(struct port *p, struct address *dst)
 	msg->announce.stepsRemoved            = clock_steps_removed(p->clock);
 	msg->announce.timeSource              = tp.timeSource;
 
+	if (p->profile_type == POWER_PROFILE_V1 ||
+	    p->profile_type == POWER_PROFILE_V2) {
+		/* IEEE C37.238 Add power profile extension. */
+		power_tlv_org_append(msg);
+		power_tlv_atoi_append(msg);
+	}
 	if (p->path_trace_enabled && path_trace_append(p, msg, dad)) {
 		pr_err("port %hu: append path trace failed", portnum(p));
 	}
@@ -1717,6 +1726,7 @@ int port_initialize(struct port *p)
 	p->operLogPdelayReqInterval = config_get_int(cfg, p->name, "operLogPdelayReqInterval");
 	p->neighborPropDelayThresh = config_get_int(cfg, p->name, "neighborPropDelayThresh");
 	p->min_neighbor_prop_delay = config_get_int(cfg, p->name, "min_neighbor_prop_delay");
+	p->profile_type = config_get_int(cfg, NULL, "profile_type");
 
 	if (config_get_int(cfg, p->name, "asCapable") == AS_CAPABLE_TRUE) {
 		p->asCapable = ALWAYS_CAPABLE;
@@ -3229,4 +3239,65 @@ int port_state_update(struct port *p, enum fsm_event event, int mdiff)
 enum bmca_select port_bmca(struct port *p)
 {
 	return p->bmca;
+}
+
+/*
+   WNT  - This function will only be active in the Power profile.
+
+   This extend the announce message with one inaccuracy TLV,
+   This code is only used for own test purpose, it runs only in OC/BC mode.
+*/
+static int power_tlv_org_append(struct ptp_message *m)
+{
+	struct msg_c37_238_announce_tlv *tlv;
+	struct tlv_extra *extra;
+
+	extra = msg_tlv_append(m, sizeof(*tlv));
+	if (!extra) {
+		return -1;
+	}
+	tlv = (struct  msg_c37_238_announce_tlv *) extra->tlv;
+	tlv->type = TLV_ORGANIZATION_EXTENSION;
+	tlv->length = sizeof(*tlv) - sizeof(tlv->type) - sizeof(tlv->length);
+	memcpy(tlv->id, ieee_c37_238_id, sizeof(ieee_c37_238_id));
+	tlv->subtype[2] = 1;
+	tlv->gm_id = 0;
+	tlv->gm_time_inaccuracy = 0;
+	tlv->network_time_inaccuracy = 0;
+	return 0;
+}
+
+/*
+   WNT  - This function will only be active in the Power profile.
+
+   This extend the announce message with one local clock TLV,
+   This code is only used for own test purpose, it runs only in OC/BC mode.
+*/
+static int power_tlv_atoi_append(struct ptp_message *m)
+{
+	struct msg_c37_238_alt_time_offset_tlv *tlv;
+	struct tlv_extra *extra;
+
+	extra = msg_tlv_append(m, sizeof(*tlv));
+	if (!extra) {
+		return -1;
+	}
+	tlv = (struct  msg_c37_238_alt_time_offset_tlv *) extra->tlv;
+	tlv->type = TLV_ALTERNATE_TIME_OFFSET_INDICATOR;
+	tlv->length = sizeof(*tlv) - sizeof(tlv->type) - sizeof(tlv->length);
+	tlv->key = 0;
+	tlv->current_offset = 0;
+	tlv->jump_second = 0;
+	tlv->time_of_next_jump[0] = 0;
+	tlv->time_of_next_jump[1] = 0;
+	tlv->time_of_next_jump[2] = 0;
+	tlv->time_of_next_jump[3] = 0;
+	tlv->time_of_next_jump[4] = 0;
+	tlv->time_of_next_jump[5] = 0;
+	tlv->display_name_len = 3;
+	tlv->display_name[0] = 'U';
+	tlv->display_name[1] = 'T';
+	tlv->display_name[2] = 'C';
+	tlv->pad = 0;
+	return 0;
 }
