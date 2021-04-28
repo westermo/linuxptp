@@ -326,6 +326,39 @@ static int mgt_post_recv(struct management_tlv *m, uint16_t data_len,
 			ntohs(psn->portIdentity.portNumber);
 		extra_len = sizeof(struct port_stats_np);
 		break;
+
+	case TLV_TRANSPARENT_CLOCK_DEFAULT_DATA_SET:
+	{
+		struct transparent_clock_default_data_set *tdds =
+			(struct transparent_clock_default_data_set *) m->data;
+
+		pr_info("%s Enter. TLV_TRANSPARENT_CLOCK_DEFAULT_DATA_SET.\n", __func__);
+		tdds->numberPorts = ntohs(tdds->numberPorts);
+		break;
+	}
+
+	case TLV_TRANSPARENT_CLOCK_PORT_DATA_SET:
+	{
+		struct transparent_clock_port_data_set *tpds =
+			(struct transparent_clock_port_data_set *) m->data;
+
+		tpds->portIdentity.portNumber =
+			ntohs(tpds->portIdentity.portNumber);
+		tpds->peerMeanPathDelay = net2host64(tpds->peerMeanPathDelay);
+		break;
+	}
+
+#if 0
+	case TLV_TIME:
+	{
+		struct Timestamp *ts = (struct Timestamp *) m->data;
+
+		ts->seconds_lsb = ntohl(ts->seconds_lsb);
+		ts->seconds_msb = ntohs(ts->seconds_msb);
+		ts->nanoseconds = ntohl(ts->nanoseconds);
+		break;
+	}
+#endif
 	case TLV_SAVE_IN_NON_VOLATILE_STORAGE:
 	case TLV_RESET_NON_VOLATILE_STORAGE:
 	case TLV_INITIALIZE:
@@ -437,6 +470,38 @@ static void mgt_pre_send(struct management_tlv *m, struct tlv_extra *extra)
 		psn->portIdentity.portNumber =
 			htons(psn->portIdentity.portNumber);
 		break;
+
+	case TLV_TRANSPARENT_CLOCK_DEFAULT_DATA_SET:
+	{
+		struct transparent_clock_default_data_set *tdds =
+			(struct transparent_clock_default_data_set *) m->data;
+		pr_info("%s Enter. TLV_TRANSPARENT_CLOCK_DEFAULT_DATA_SET.\n", __func__);
+		tdds->numberPorts = htons(tdds->numberPorts);
+		break;
+
+	}
+
+	case TLV_TRANSPARENT_CLOCK_PORT_DATA_SET:
+	{
+		struct transparent_clock_port_data_set *tpds =
+			(struct transparent_clock_port_data_set *) m->data;
+
+		tpds->portIdentity.portNumber =
+			htons(tpds->portIdentity.portNumber);
+		tpds->peerMeanPathDelay = host2net64(tpds->peerMeanPathDelay);
+		break;
+	}
+#if 0
+	case TLV_TIME:
+	{
+		struct Timestamp *ts = (struct Timestamp *) m->data;
+
+		ts->seconds_lsb = htonl(ts->seconds_lsb);
+		ts->seconds_msb = htons(ts->seconds_msb);
+		ts->nanoseconds = htonl(ts->nanoseconds);
+		break;
+	}
+#endif
 	}
 }
 

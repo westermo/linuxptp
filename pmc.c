@@ -154,6 +154,8 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 	struct currentDS *cds;
 	struct parentDS *pds;
 	struct portDS *p;
+	struct transparent_clock_default_data_set *tds;
+	struct transparent_clock_port_data_set *tcpds;
 	struct TLV *tlv;
 	int action;
 
@@ -516,6 +518,37 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 		mtd = (struct management_tlv_datum *) mgt->data;
 		fprintf(fp, "LOG_MIN_PDELAY_REQ_INTERVAL "
 			IFMT "logMinPdelayReqInterval %hhd", mtd->val);
+		break;
+
+	case TLV_TRANSPARENT_CLOCK_DEFAULT_DATA_SET:
+		tds = (struct transparent_clock_default_data_set *) mgt->data;
+		fprintf(fp, "TLV_TRANSPARENT_CLOCK_DEFAULT_DATA_SET "
+			IFMT "clockIdentity           %s"
+			IFMT "numberPorts             %hu"
+			IFMT "delayMechanism          %hu"
+			IFMT "domainNumber            %hhu",
+			cid2str(&tds->clockIdentity),
+			tds->numberPorts,
+			tds->delayMechanism,
+			tds->primaryDomain);
+		break;
+
+	case TLV_TRANSPARENT_CLOCK_PORT_DATA_SET:
+		tcpds = (struct transparent_clock_port_data_set *) mgt->data;
+                fprintf(fp, "TRANSPARENT_CLOCK_PORT_DATA_SET "
+                        IFMT "portIdentity            %s"
+                        IFMT "portState               %s"
+                        IFMT "delayMechanism          %d"
+                        IFMT "faultyFlag              %d"
+                        IFMT "logMinPdelayReqInterval %hhd"
+                        IFMT "peerMeanPathDelay       %" PRId64,
+                        pid2str(&tcpds->portIdentity),
+			ps_str[tcpds->portState],
+			tcpds->delayMechanism,
+                        tcpds->faultyFlag,
+                        tcpds->logMinPdelayReqInterval,
+                        tcpds->peerMeanPathDelay >> 16);
+
 		break;
 	}
 out:

@@ -347,7 +347,7 @@ static int clock_management_fill_response(struct clock *c, struct port *p,
 	struct time_status_np *tsn;
 	struct tlv_extra *extra;
 	struct PTPText *text;
-	int datalen = 0;
+	int datalen = 0, respond = 0;
 
 	extra = tlv_extra_alloc();
 	if (!extra) {
@@ -457,6 +457,41 @@ static int clock_management_fill_response(struct clock *c, struct port *p,
 		mtd->val = c->local_sync_uncertain;
 		datalen = sizeof(*mtd);
 		break;
+
+	case TLV_TRANSPARENT_CLOCK_DEFAULT_DATA_SET:
+	{
+		struct transparent_clock_default_data_set *dds =
+			(struct transparent_clock_default_data_set *) tlv->data;
+
+		respond = 1;
+		if ((c->type == CLOCK_TYPE_P2P || c->type == CLOCK_TYPE_E2E) && c->nports > 1)
+			pr_info("%s Transparent clock. respond=%d\n", __func__, respond);
+		else
+			break;
+		memcpy(&dds->clockIdentity, &c->dds.clockIdentity,
+		       sizeof(struct ClockIdentity));
+		dds->numberPorts = c->nports;
+		dds->delayMechanism = 0;
+		dds->primaryDomain = c->dds.domainNumber;
+		datalen = sizeof(*dds);
+		break;
+	}
+#if 0
+	case TLV_TIME:
+	{
+		struct timespec now;
+		struct Timestamp *ts = (struct Timestamp *) tlv->data;
+
+		clock_gettime(c->clkid, &now);
+		ts->nanoseconds = now.tv_nsec;
+		ts->seconds_lsb = now.tv_sec;
+		ts->seconds_msb = 0;
+		datalen = sizeof(*ts);
+		respond = 1;
+		break;
+	}
+#endif
+
 	default:
 		/* The caller should *not* respond to this message. */
 		tlv_extra_recycle(extra);
@@ -1399,10 +1434,14 @@ int clock_manage(struct clock *c, struct port *p, struct ptp_message *msg)
 	if (!cid_eq(tcid, &wildcard) && !cid_eq(tcid, &c->dds.clockIdentity)) {
 		return changed;
 	}
-	if (msg_tlv_count(msg) != 1) {
-		return changed;
+	if (c->type == CLOCK_TYPE_ORDINARY || c->type == CLOCK_TYPE_BOUNDARY) {
+		if (msg_tlv_count(msg) != 1) {
+			return changed;
+		}
 	}
 	mgt = (struct management_tlv *) msg->management.suffix;
+	if (c->type == CLOCK_TYPE_P2P || c->type == CLOCK_TYPE_P2P)
+		mgt->id = ntohs(mgt->id);
 
 	/*
 	  The correct length according to the management ID is checked
@@ -1483,6 +1522,7 @@ int clock_manage(struct clock *c, struct port *p, struct ptp_message *msg)
 	default:
 		answers = 0;
 		LIST_FOREACH(piter, &c->ports, list) {
+			pr_info("%s list port_manage.\n", __func__);
 			res = port_manage(piter, p, msg);
 			if (res < 0)
 				return changed;

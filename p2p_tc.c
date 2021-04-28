@@ -215,8 +215,13 @@ enum fsm_event p2p_event(struct port *p, int fd_index)
 			event = EV_STATE_DECISION_EVENT;
 		}
 		break;
-	case SIGNALING:
+
 	case MANAGEMENT:
+		if (clock_manage(p->clock, p, msg))
+			event = EV_STATE_DECISION_EVENT;
+		break;
+
+	case SIGNALING:
 		if (tc_forward(p, msg)) {
 			event = EV_FAULT_DETECTED;
 		}

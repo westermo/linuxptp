@@ -404,4 +404,23 @@ int tlv_post_recv(struct tlv_extra *extra);
  */
 void tlv_pre_send(struct TLV *tlv, struct tlv_extra *extra);
 
+/* to support pmc on TC, AO */
+struct transparent_clock_default_data_set {
+	struct ClockIdentity clockIdentity;
+	UInteger16 numberPorts;
+	UInteger8 delayMechanism;
+	UInteger8 primaryDomain;
+} PACKED;
+
+struct transparent_clock_port_data_set {
+	struct PortIdentity portIdentity;
+	UInteger8 portState;
+	UInteger8 faultyFlag:1;
+	UInteger8 delayMechanism;
+	Integer8 logMinPdelayReqInterval;
+	Integer8 logAnnounceInterval;
+	Integer8 announceReceiptTimeout;
+	TimeInterval peerMeanPathDelay;
+} PACKED;
+
 #endif
