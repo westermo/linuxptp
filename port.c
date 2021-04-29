@@ -953,28 +953,6 @@ static int port_management_fill_response(struct port *target,
 		datalen = sizeof(*psn);
 		break;
 
-	case TLV_TRANSPARENT_CLOCK_DEFAULT_DATA_SET:
-		pr_info("%s ##### PORT TRANS DEFAULT.\n", __func__);
-		psn = (struct port_stats_np *)tlv->data;
-		psn->portIdentity = target->portIdentity;
-		psn->stats = target->stats;
-		datalen = sizeof(*psn);
-		break;
-
-	case TLV_TRANSPARENT_CLOCK_PORT_DATA_SET:
-	{
-		struct transparent_clock_port_data_set *tpds =
-			(struct transparent_clock_port_data_set *) tlv->data;
-		pr_info("%s ##### PORT TRANS PORT.\n", __func__);
-		tpds->portIdentity = target->portIdentity;
-		tpds->faultyFlag = 0; //target->stats;
-		tpds->logMinPdelayReqInterval = target->logMinPdelayReqInterval;
-		tpds->peerMeanPathDelay = target->peerMeanPathDelay;
-		tpds->delayMechanism =target->delayMechanism;
-		tpds->portState = target->state;
-		datalen = sizeof(*tpds);
-		break;
-	}
 	default:
 		/* The caller should *not* respond to this message. */
 		tlv_extra_recycle(extra);
@@ -2876,6 +2854,7 @@ int port_manage(struct port *p, struct port *ingress, struct ptp_message *msg)
 	default:
 		return -1;
 	}
+
 	switch (mgt->id) {
 	case TLV_NULL_MANAGEMENT:
 	case TLV_CLOCK_DESCRIPTION:
@@ -2945,6 +2924,7 @@ port_management_construct(struct PortIdentity pid, struct port *ingress,
 	msg = msg_allocate();
 	if (!msg)
 		return NULL;
+
 	msg->hwts.type = ingress->timestamping;
 
 	msg->header.tsmt               = MANAGEMENT | ingress->transportSpecific;
