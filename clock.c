@@ -1400,14 +1400,12 @@ int clock_manage(struct clock *c, struct port *p, struct ptp_message *msg)
 	if (!cid_eq(tcid, &wildcard) && !cid_eq(tcid, &c->dds.clockIdentity)) {
 		return changed;
 	}
-	if (c->type == CLOCK_TYPE_ORDINARY || c->type == CLOCK_TYPE_BOUNDARY) {
-		if (msg_tlv_count(msg) != 1) {
-			return changed;
-		}
+
+	if (msg_tlv_count(msg) != 1) {
+		return changed;
 	}
+
 	mgt = (struct management_tlv *) msg->management.suffix;
-	if (c->type == CLOCK_TYPE_P2P || c->type == CLOCK_TYPE_P2P)
-		mgt->id = ntohs(mgt->id);
 
 	/*
 	  The correct length according to the management ID is checked
