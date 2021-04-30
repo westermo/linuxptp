@@ -323,8 +323,8 @@ static void clock_freq_est_reset(struct clock *c)
 	c->fest.count = 0;
 }
 
-static void clock_management_send_error(struct port *p,
-					struct ptp_message *msg, int error_id)
+void clock_management_send_error(struct port *p,
+                                 struct ptp_message *msg, int error_id)
 {
 	if (port_management_error(port_identity(p), p, msg, error_id))
 		pr_err("failed to send management error status");
@@ -472,8 +472,8 @@ static int clock_management_fill_response(struct clock *c, struct port *p,
 	return 1;
 }
 
-static int clock_management_get_response(struct clock *c, struct port *p,
-					 int id, struct ptp_message *req)
+int clock_management_get_response(struct clock *c, struct port *p,
+				  int id, struct ptp_message *req)
 {
 	struct PortIdentity pid = port_identity(p);
 	struct ptp_message *rsp;
