@@ -187,6 +187,23 @@ void clock_fda_changed(struct clock *c);
 tmv_t clock_ingress_time(struct clock *c);
 
 /**
+ * Obtain a response to a management packet from the local clock.
+ * @param c    The clock instance.
+ * @param p    The port on which the message arrived.
+ * @param req  A management message request.
+ */
+void clock_management_send_error(struct port *p,
+                                 struct ptp_message *msg, int error_id);
+/**
+ * Obtain a response to a management packet from the local clock.
+ * @param c    The clock instance.
+ * @param p    The port on which the message arrived.
+ * @param req  A management message request.
+ */
+int clock_management_get_response(struct clock *c, struct port *p,
+                                  int id, struct ptp_message *req);
+
+/**
  * Manage the clock according to a given message.
  * @param c    The clock instance.
  * @param p    The port on which the message arrived.

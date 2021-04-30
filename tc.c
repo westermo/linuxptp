@@ -390,6 +390,56 @@ void tc_flush(struct port *q)
 	}
 }
 
+int tc_manage(struct port *q, struct ptp_message *msg)
+{
+	struct management_tlv *mgt;
+	struct port *p;
+	int changed = 0;
+	int answers;
+	int res;
+
+	/*
+	 * According to 1588v2 spec, all data sets do not apply to
+	 * transparent clock. However, some of the information which is
+	 * available for ordinary/bondary clock is still useful.
+	 */
+	mgt = (struct management_tlv *) msg->management.suffix;
+	switch (management_action(msg)) {
+	case GET:
+		if (clock_management_get_response(q->clock, q, mgt->id, msg))
+			return changed;
+		break;
+	case SET:
+		return changed;
+	default:
+		return changed;
+	}
+
+	switch(mgt->id) {
+	case MID_TRANSPARENT_CLOCK_PORT_DATA_SET:
+		answers = 0;
+		for (p = clock_first_port(q->clock); p; p = LIST_NEXT(p, list)) {
+			res = port_manage(p, q, msg);
+			if (res < 0)
+				return changed;
+			if (res > 0)
+				answers++;
+		}
+		if (!answers) {
+			/* IEEE 1588 Interpretation #21 suggests to use
+			 * MID_WRONG_VALUE for ports that do not exist */
+			clock_management_send_error(p, msg, MID_WRONG_VALUE);
+		}
+		break;
+	default:
+		clock_management_send_error(q, msg, MID_NOT_SUPPORTED);
+		break;
+	}
+
+	return changed;
+}
+
+
 int tc_forward(struct port *q, struct ptp_message *msg)
 {
 	uint16_t steps_removed;
