@@ -38,6 +38,15 @@ void tc_flush(struct port *q);
 int tc_forward(struct port *q, struct ptp_message *msg);
 
 /**
+ * Manage the clock according to a given message.
+ * @param p    The port on which the message arrived.
+ * @param msg  A management message.
+ * @return     One if the management action caused a change that
+ *             implies a state decision event, zero otherwise.
+ */
+int tc_manage(struct port *p, struct ptp_message *msg);
+
+/**
  * Forwards a given Follow-Up message out all other ports.
  *
  * This function adds the unique, per egress port residence time into
