@@ -76,7 +76,7 @@ void e2e_dispatch(struct port *p, enum fsm_event event, int mdiff)
 
 enum fsm_event e2e_event(struct port *p, int fd_index)
 {
-	int cnt, fd = p->fda.fd[fd_index];
+	int cnt, err, fd = p->fda.fd[fd_index];
 	enum fsm_event event = EV_NONE;
 	struct ptp_message *msg, *dup;
 
@@ -212,8 +212,32 @@ enum fsm_event e2e_event(struct port *p, int fd_index)
 			event = EV_STATE_DECISION_EVENT;
 		}
 		break;
-	case SIGNALING:
 	case MANAGEMENT:
+	{
+		if (tc_forward(p, msg)) {
+			event = EV_FAULT_DETECTED;
+			break;
+		}
+
+		err = msg_post_recv(msg, cnt);
+		if (err) {
+			switch (err) {
+			case -EBADMSG:
+				pr_err("port %hu: bad message", portnum(p));
+				break;
+			case -EPROTO:
+				pr_debug("port %hu: ignoring message", portnum(p));
+				break;
+			}
+			msg_put(msg);
+			return EV_NONE;
+		}
+
+		if (tc_manage(p, msg))
+			event = EV_STATE_DECISION_EVENT;
+		break;
+	}
+	case SIGNALING:
 		if (tc_forward(p, msg)) {
 			event = EV_FAULT_DETECTED;
 		}
