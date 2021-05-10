@@ -220,6 +220,14 @@ struct port *port_open(const char *phc_device,
 struct ptp_message *port_signaling_construct(struct port *p,
 					     const struct PortIdentity *tpid);
 
+
+/**
+ * Return a port's delay mechanism
+ * @param port	A port instance
+ * @return	A value representing the ports delay mechanism.
+ */
+Enumeration8 port_delaymechanism(struct port *port);
+
 /**
  * Returns a port's current state.
  * @param port  A port instance.
