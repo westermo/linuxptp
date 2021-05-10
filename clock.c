@@ -344,6 +344,7 @@ static int clock_management_fill_response(struct clock *c, struct port *p,
 	struct management_tlv *tlv;
 	struct time_status_np *tsn;
 	struct tlv_extra *extra;
+	struct transparentClockDefaultDS *tcds;
 	struct PTPText *text;
 	int datalen = 0;
 
@@ -415,6 +416,14 @@ static int clock_management_fill_response(struct clock *c, struct port *p,
 		mtd = (struct management_tlv_datum *) tlv->data;
 		mtd->val = c->tds.flags & PTP_TIMESCALE;
 		datalen = sizeof(*mtd);
+		break;
+	case TLV_TRANSPARENT_CLOCK_DEFAULT_DATA_SET:
+		tcds = (struct transparentClockDefaultDS *) tlv->data;
+		memcpy(&tcds->clockIdentity, &c->dds.clockIdentity, sizeof(tcds->clockIdentity));
+		memcpy(&tcds->numberPorts, &c->dds.numberPorts, sizeof(tcds->numberPorts));
+		tcds->delayMechanism = port_delaymechanism(clock_first_port(c));
+		memcpy(&tcds->primaryDomain, &c->dds.domainNumber, sizeof(tcds->primaryDomain));
+		datalen = sizeof(struct transparentClockDefaultDS);
 		break;
 	case TLV_TIME_STATUS_NP:
 		tsn = (struct time_status_np *) tlv->data;
