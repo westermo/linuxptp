@@ -125,7 +125,7 @@ struct management_id idtab[] = {
 	{ "ALTERNATE_TIME_OFFSET_MAX_KEY", MID_ALTERNATE_TIME_OFFSET_MAX_KEY, not_supported },
 	{ "ALTERNATE_TIME_OFFSET_PROPERTIES", MID_ALTERNATE_TIME_OFFSET_PROPERTIES, do_set_action },
 	{ "MASTER_ONLY", MID_MASTER_ONLY, do_get_action },
-	{ "TRANSPARENT_CLOCK_DEFAULT_DATA_SET", MID_TRANSPARENT_CLOCK_DEFAULT_DATA_SET, not_supported },
+	{ "TRANSPARENT_CLOCK_DEFAULT_DATA_SET", MID_TRANSPARENT_CLOCK_DEFAULT_DATA_SET, do_get_action },
 	{ "PRIMARY_DOMAIN", MID_PRIMARY_DOMAIN, not_supported },
 	{ "TIME_STATUS_NP", MID_TIME_STATUS_NP, do_get_action },
 	{ "GRANDMASTER_SETTINGS_NP", MID_GRANDMASTER_SETTINGS_NP, do_set_action },
@@ -146,7 +146,7 @@ struct management_id idtab[] = {
 	{ "UNICAST_MASTER_MAX_TABLE_SIZE", MID_UNICAST_MASTER_MAX_TABLE_SIZE, not_supported },
 	{ "ACCEPTABLE_MASTER_TABLE_ENABLED", MID_ACCEPTABLE_MASTER_TABLE_ENABLED, not_supported },
 	{ "ALTERNATE_MASTER", MID_ALTERNATE_MASTER, not_supported },
-	{ "TRANSPARENT_CLOCK_PORT_DATA_SET", MID_TRANSPARENT_CLOCK_PORT_DATA_SET, not_supported },
+	{ "TRANSPARENT_CLOCK_PORT_DATA_SET", MID_TRANSPARENT_CLOCK_PORT_DATA_SET, do_get_action },
 	{ "DELAY_MECHANISM", MID_DELAY_MECHANISM, do_get_action },
 	{ "LOG_MIN_PDELAY_REQ_INTERVAL", MID_LOG_MIN_PDELAY_REQ_INTERVAL, do_get_action },
 	{ "PORT_DATA_SET_NP", MID_PORT_DATA_SET_NP, do_set_action },
@@ -619,6 +619,9 @@ static int pmc_tlv_datalen(struct pmc *pmc, int id)
 	case MID_MASTER_ONLY:
 	case MID_SYNCHRONIZATION_UNCERTAIN_NP:
 		len += sizeof(struct management_tlv_datum);
+		break;
+	case MID_TRANSPARENT_CLOCK_DEFAULT_DATA_SET:
+		len += sizeof(struct transparentClockDefaultDS);
 		break;
 	case MID_TIME_STATUS_NP:
 		len += sizeof(struct time_status_np);

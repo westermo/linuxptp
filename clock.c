@@ -425,6 +425,7 @@ static int clock_management_fill_response(struct clock *c, struct port *p,
 	struct management_tlv *tlv;
 	struct time_status_np *tsn;
 	struct tlv_extra *extra;
+	struct transparentClockDefaultDS *tcds;
 	struct PTPText *text;
 	uint16_t duration;
 	int datalen = 0;
@@ -536,6 +537,14 @@ static int clock_management_fill_response(struct clock *c, struct port *p,
 		memcpy(&atop->timeOfNextJump.seconds_msb, &c->tz[key].next_jump_msb,
 		       sizeof(atop->timeOfNextJump.seconds_msb));
 		datalen = sizeof(*atop);
+		break;
+	case MID_TRANSPARENT_CLOCK_DEFAULT_DATA_SET:
+		tcds = (struct transparentClockDefaultDS *) tlv->data;
+		memcpy(&tcds->clockIdentity, &c->dds.clockIdentity, sizeof(tcds->clockIdentity));
+		memcpy(&tcds->numberPorts, &c->dds.numberPorts, sizeof(tcds->numberPorts));
+		tcds->delayMechanism = port_delay_mechanism(clock_first_port(c));
+		memcpy(&tcds->primaryDomain, &c->dds.domainNumber, sizeof(tcds->primaryDomain));
+		datalen = sizeof(struct transparentClockDefaultDS);
 		break;
 	case MID_TIME_STATUS_NP:
 		tsn = (struct time_status_np *) tlv->data;

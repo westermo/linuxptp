@@ -879,6 +879,7 @@ static int port_management_fill_response(struct port *target,
 {
 	struct ieee_c37_238_settings_np *pwr;
 	struct unicast_master_table_np *umtn;
+	struct transparentClockPortDS *tcpds;
 	struct unicast_master_address *ucma;
 	struct port_service_stats_np *pssn;
 	struct mgmt_clock_description *cd;
@@ -1030,6 +1031,14 @@ static int port_management_fill_response(struct port *target,
 		mtd = (struct management_tlv_datum *) tlv->data;
 		mtd->val = target->master_only;
 		datalen = sizeof(*mtd);
+		break;
+	case MID_TRANSPARENT_CLOCK_PORT_DATA_SET:
+		tcpds = (struct transparentClockPortDS *) tlv->data;
+		tcpds->portIdentity            = target->portIdentity;
+		tcpds->faultyFlag              = (target->state == PS_FAULTY);
+		tcpds->logMinPdelayReqInterval = target->logMinPdelayReqInterval;
+		tcpds->peerMeanPathDelay       = target->peerMeanPathDelay;
+		datalen = sizeof(*tcpds);
 		break;
 	case MID_DELAY_MECHANISM:
 		mtd = (struct management_tlv_datum *) tlv->data;
