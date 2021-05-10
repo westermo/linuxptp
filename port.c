@@ -784,6 +784,7 @@ static const Octet profile_id_p2p[] = {0x00, 0x1B, 0x19, 0x00, 0x02, 0x00};
 static int port_management_fill_response(struct port *target,
 					 struct ptp_message *rsp, int id)
 {
+	struct transparentClockPortDS *tcpds;
 	struct mgmt_clock_description *cd;
 	struct management_tlv_datum *mtd;
 	struct clock_description *desc;
@@ -914,6 +915,14 @@ static int port_management_fill_response(struct port *target,
 		mtd = (struct management_tlv_datum *) tlv->data;
 		mtd->val = target->versionNumber;
 		datalen = sizeof(*mtd);
+		break;
+	case TLV_TRANSPARENT_CLOCK_PORT_DATA_SET:
+		tcpds = (struct transparentClockPortDS *) tlv->data;
+		tcpds->portIdentity            = target->portIdentity;
+		tcpds->faultyFlag              = (target->state == PS_FAULTY);
+		tcpds->logMinPdelayReqInterval = target->logMinPdelayReqInterval;
+		tcpds->peerMeanPathDelay       = target->peerMeanPathDelay;
+		datalen = sizeof(*tcpds);
 		break;
 	case TLV_DELAY_MECHANISM:
 		mtd = (struct management_tlv_datum *) tlv->data;
@@ -3178,6 +3187,11 @@ err_port:
 enum port_state port_state(struct port *port)
 {
 	return port->state;
+}
+
+Enumeration8 port_delaymechanism(struct port *port)
+{
+	return port->delayMechanism;
 }
 
 int port_state_update(struct port *p, enum fsm_event event, int mdiff)

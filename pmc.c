@@ -139,6 +139,8 @@ static void pmc_show_signaling(struct ptp_message *msg, FILE *fp)
 
 static void pmc_show(struct ptp_message *msg, FILE *fp)
 {
+	struct transparentClockDefaultDS *tcds;
+	struct transparentClockPortDS *tcpds;
 	struct grandmaster_settings_np *gsn;
 	struct mgmt_clock_description *cd;
 	struct subscribe_events_np *sen;
@@ -335,6 +337,18 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 		fprintf(fp, "TIMESCALE_PROPERTIES "
 			IFMT "ptpTimescale %d", mtd->val & PTP_TIMESCALE ? 1 : 0);
 		break;
+	case TLV_TRANSPARENT_CLOCK_DEFAULT_DATA_SET:
+		tcds = (struct transparentClockDefaultDS *) mgt->data;
+		fprintf(fp, "TRANSPARENT_CLOCK_DEFAULT_DATA_SET "
+			IFMT "clockIdentity           %s"
+			IFMT "numberPorts             %hu"
+			IFMT "delayMechanism          %hhu"
+			IFMT "primaryDomain           %hhu",
+			cid2str(&tcds->clockIdentity),
+			tcds->numberPorts,
+			tcds->delayMechanism,
+			tcds->primaryDomain);
+		break;
 	case TLV_TIME_STATUS_NP:
 		tsn = (struct time_status_np *) mgt->data;
 		fprintf(fp, "TIME_STATUS_NP "
@@ -506,6 +520,17 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 		mtd = (struct management_tlv_datum *) mgt->data;
 		fprintf(fp, "VERSION_NUMBER "
 			IFMT "versionNumber %hhu", mtd->val);
+		break;
+	case TLV_TRANSPARENT_CLOCK_PORT_DATA_SET:
+		tcpds = (struct transparentClockPortDS *) mgt->data;
+		fprintf(fp, "TRANSPARENT_CLOCK_PORT_DATA_SET "
+			IFMT "portIdentity            %s"
+			IFMT "faultyFlag              %d"
+			IFMT "logMinPdelayReqInterval %hhd"
+			IFMT "peerMeanPathDelay       %" PRId64,
+			pid2str(&tcpds->portIdentity), tcpds->faultyFlag,
+			tcpds->logMinPdelayReqInterval,
+			tcpds->peerMeanPathDelay >> 16);
 		break;
 	case TLV_DELAY_MECHANISM:
 		mtd = (struct management_tlv_datum *) mgt->data;
