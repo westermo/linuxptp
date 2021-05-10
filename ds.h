@@ -107,6 +107,20 @@ struct portDS {
 	UInteger8           versionNumber;
 } PACKED;
 
+struct transparentClockDefaultDS {
+	struct ClockIdentity clockIdentity;
+	UInteger16           numberPorts;
+	Enumeration8         delayMechanism;
+	UInteger8            primaryDomain;
+} PACKED;
+
+struct transparentClockPortDS {
+	struct PortIdentity portIdentity;
+	Integer8            faultyFlag;
+	Integer8            logMinPdelayReqInterval;
+	TimeInterval        peerMeanPathDelay;
+} PACKED;
+
 #define FRI_ASAP (-128)
 
 #endif
