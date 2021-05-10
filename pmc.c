@@ -159,8 +159,10 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 {
 	struct alternate_time_offset_properties *atop;
 	struct alternate_time_offset_name *aton;
+	struct transparentClockDefaultDS *tcds;
 	struct ieee_c37_238_settings_np *pwr;
 	struct unicast_master_table_np *umtn;
+	struct transparentClockPortDS *tcpds;
 	struct grandmaster_settings_np *gsn;
 	struct port_service_stats_np *pssp;
 	struct mgmt_clock_description *cd;
@@ -397,6 +399,18 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 		mtd = (struct management_tlv_datum *) mgt->data;
 		fprintf(fp, "MASTER_ONLY "
 			IFMT "masterOnly %d", mtd->val);
+		break;
+	case MID_TRANSPARENT_CLOCK_DEFAULT_DATA_SET:
+		tcds = (struct transparentClockDefaultDS *) mgt->data;
+		fprintf(fp, "TRANSPARENT_CLOCK_DEFAULT_DATA_SET "
+			IFMT "clockIdentity           %s"
+			IFMT "numberPorts             %hu"
+			IFMT "delayMechanism          %hhu"
+			IFMT "primaryDomain           %hhu",
+			cid2str(&tcds->clockIdentity),
+			tcds->numberPorts,
+			tcds->delayMechanism,
+			tcds->primaryDomain);
 		break;
 	case MID_TIME_STATUS_NP:
 		tsn = (struct time_status_np *) mgt->data;
@@ -642,6 +656,17 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 		mtd = (struct management_tlv_datum *) mgt->data;
 		fprintf(fp, "VERSION_NUMBER "
 			IFMT "versionNumber %hhu", mtd->val & MAJOR_VERSION_MASK);
+		break;
+	case MID_TRANSPARENT_CLOCK_PORT_DATA_SET:
+		tcpds = (struct transparentClockPortDS *) mgt->data;
+		fprintf(fp, "TRANSPARENT_CLOCK_PORT_DATA_SET "
+			IFMT "portIdentity            %s"
+			IFMT "faultyFlag              %d"
+			IFMT "logMinPdelayReqInterval %hhd"
+			IFMT "peerMeanPathDelay       %" PRId64,
+			pid2str(&tcpds->portIdentity), tcpds->faultyFlag,
+			tcpds->logMinPdelayReqInterval,
+			tcpds->peerMeanPathDelay >> 16);
 		break;
 	case MID_DELAY_MECHANISM:
 		mtd = (struct management_tlv_datum *) mgt->data;
