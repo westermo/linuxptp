@@ -195,6 +195,17 @@ void clock_management_send_error(struct port *p,
 int clock_management_get_response(struct clock *c, struct port *p,
                                   int id, struct ptp_message *req);
 
+
+/**
+ * Manage the local clock according to a given message.
+ * @param c    The clock instance.
+ * @param p    The port on which the message arrived.
+ * @param msg  A management message.
+ * @return     One if the management action caused a change that
+ *             implies a state decision event, zero otherwise.
+ */
+int clock_do_manage(struct clock *c, struct port *p, struct ptp_message *msg);
+
 /**
  * Manage the clock according to a given message.
  * @param c    The clock instance.
