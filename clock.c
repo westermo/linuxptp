@@ -1607,7 +1607,7 @@ tmv_t clock_ingress_time(struct clock *c)
 	return c->ingress_ts;
 }
 
-int clock_manage(struct clock *c, struct port *p, struct ptp_message *msg)
+int clock_do_manage(struct clock *c, struct port *p, struct ptp_message *msg)
 {
 	int changed = 0, res, answers;
 	struct port *piter;
@@ -1615,9 +1615,6 @@ int clock_manage(struct clock *c, struct port *p, struct ptp_message *msg)
 	struct ClockIdentity *tcid, wildcard = {
 		{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 	};
-
-	/* Forward this message out all eligible ports. */
-	clock_forward_mgmt_msg(c, p, msg);
 
 	/* Apply this message to the local clock and ports. */
 	tcid = &msg->management.targetPortIdentity.clockIdentity;
@@ -1725,6 +1722,13 @@ int clock_manage(struct clock *c, struct port *p, struct ptp_message *msg)
 		break;
 	}
 	return changed;
+}
+
+int clock_manage(struct clock *c, struct port *p, struct ptp_message *msg)
+{
+	/* Forward this message out all eligible ports. */
+	clock_forward_mgmt_msg(c, p, msg);
+	return clock_do_manage(c, p, msg);
 }
 
 void clock_notify_event(struct clock *c, enum notification event)
