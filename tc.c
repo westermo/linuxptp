@@ -80,8 +80,12 @@ static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 		return 1;
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
-		/* Delay_Req swims against the stream. */
-		if (msg_type(m) != DELAY_REQ) {
+		/* Delay_Req and Management swims against the stream. */
+		switch(msg_type(m)) {
+		case DELAY_REQ:
+		case MANAGEMENT:
+			break;
+		default:
 			return 1;
 		}
 		break;
@@ -101,8 +105,12 @@ static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 		return 1;
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
-		/* Delay_Req swims against the stream. */
-		if (msg_type(m) != DELAY_REQ) {
+		/* Delay_Req and Management swims against the stream. */
+		switch(msg_type(m)) {
+		case DELAY_REQ:
+		case MANAGEMENT:
+			break;
+		default:
 			return 1;
 		}
 		break;
