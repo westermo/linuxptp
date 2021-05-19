@@ -68,6 +68,10 @@ static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 	if (m->header.domainNumber != clock_domain_number(p->clock)) {
 		return 0;
 	}
+
+	if (!portnum(q) && port_state(q) != PS_FAULTY)
+		goto egress;
+
 	/* Ingress state */
 	s = port_state(q);
 	switch (s) {
@@ -93,6 +97,8 @@ static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 	case PS_SLAVE:
 		break;
 	}
+
+egress:
 	/* Egress state */
 	s = port_state(p);
 	switch (s) {
@@ -105,7 +111,8 @@ static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 		return 1;
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
-		/* Delay_Req and Management swims against the stream. */
+		/* Delay_Req does and Management may
+		 * swims against the stream. */
 		switch(msg_type(m)) {
 		case DELAY_REQ:
 		case MANAGEMENT:
@@ -399,8 +406,56 @@ void tc_flush(struct port *q)
 	}
 }
 
+
+static int forwarding(struct clock *c, struct port *p)
+{
+	enum port_state ps = port_state(p);
+	switch (ps) {
+	case PS_MASTER:
+	case PS_GRAND_MASTER:
+	case PS_SLAVE:
+	case PS_UNCALIBRATED:
+	case PS_PRE_MASTER:
+		return 1;
+	default:
+		break;
+	}
+	if (p == clock_uds_port(c) && ps != PS_FAULTY) {
+		return 1;
+	}
+	return 0;
+}
+
 int tc_manage(struct port *q, struct ptp_message *msg)
 {
+	struct port *p;
+	int cnt;
+	int pdulen;
+
+	if (forwarding(q->clock, q) && msg->management.boundaryHops) {
+		msg->management.boundaryHops = 0;
+		pdulen = msg->header.messageLength;
+		p = clock_uds_port(q->clock);
+
+		/*
+		 * Accept management respones to uds port
+		 */
+		switch (management_action(msg)) {
+		case GET:
+		case SET:
+		case COMMAND:
+			break;
+		case RESPONSE:
+		case ACKNOWLEDGE:
+			msg_pre_send(msg);
+			cnt = transport_send(p->trp, &p->fda, TRANS_GENERAL, msg);
+			if (cnt <= 0)
+				pr_err("tc failed to forward message to uds port");
+			else
+				pr_err("response processed");
+			msg_post_recv(msg, pdulen);
+		}
+	}
 	return clock_do_manage(q->clock, q, msg);
 }
 
