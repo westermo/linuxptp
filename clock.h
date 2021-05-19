@@ -187,6 +187,12 @@ void clock_fda_changed(struct clock *c);
 tmv_t clock_ingress_time(struct clock *c);
 
 /**
+ * Obtains uds clock port
+ * @param c    The clock instance.
+ * @return     The local uds clock port
+ */
+struct port *clock_uds_rw_port(struct clock *c);
+/**
  * Obtain a response to a management packet from the local clock.
  * @param c    The clock instance.
  * @param p    The port on which the message arrived.

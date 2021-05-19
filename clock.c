@@ -1580,6 +1580,11 @@ static int clock_do_forward_mgmt(struct clock *c,
 	return port_forward(out, msg);
 }
 
+struct port *clock_uds_rw_port(struct clock *c)
+{
+	return c->uds_rw_port;
+}
+
 static void clock_forward_mgmt_msg(struct clock *c, struct port *p, struct ptp_message *msg)
 {
 	struct port *piter;
