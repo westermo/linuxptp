@@ -859,6 +859,16 @@ static void clock_remove_port(struct clock *c, struct port *p)
 	 * it all anyway. This function is usable from other parts of
 	 * the code, but even then we don't mind if pollfd is larger
 	 * than necessary. */
+	struct fdarray *fda;
+	struct interface *iface;
+
+	fda = port_fda(p);
+	iface = port_interface(p);
+	pr_debug("%s iface=%s\n", __func__, interface_name(iface));
+	/* Turn off timestamping in the hw, when disable ptp on the port. */
+	sk_timestamping_init(fda->fd[FD_EVENT], interface_name(iface),
+			     0, TS_SOFTWARE, TRANS_IEEE_802_3);
+
 	LIST_REMOVE(p, list);
 	c->nports--;
 	clock_fda_changed(c);
