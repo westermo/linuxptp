@@ -57,6 +57,7 @@ struct raw {
 	int egress_vlan_tagged;
 	int egress_vlan_id;
 	int egress_vlan_prio;
+	char *name;
 };
 
 /* Ethernet frame header including VLAN tag */
@@ -210,6 +211,10 @@ static int raw_configure(int fd, int event, int index,
 
 static int raw_close(struct transport *t, struct fdarray *fda)
 {
+	struct raw *raw = container_of(t, struct raw, t);
+
+	sk_timestamping_destroy(fda->fd[0], raw->name);
+
 	close(fda->fd[0]);
 	close(fda->fd[1]);
 	return 0;
@@ -357,6 +362,7 @@ static int raw_open(struct transport *t, struct interface *iface,
 
 	mac_to_addr(&raw->ptp_addr, ptp_dst_mac);
 	mac_to_addr(&raw->p2p_addr, p2p_dst_mac);
+	raw->name = strdup(name);
 
 	if (sk_interface_macaddr(name, &raw->src_addr))
 		goto no_mac;
@@ -495,6 +501,7 @@ static int raw_send(struct transport *t, struct fdarray *fda,
 static void raw_release(struct transport *t)
 {
 	struct raw *raw = container_of(t, struct raw, t);
+	free(raw->name);
 	free(raw);
 }
 

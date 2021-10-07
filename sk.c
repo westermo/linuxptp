@@ -565,6 +565,12 @@ int sk_set_priority(int fd, int family, uint8_t dscp)
 	return 0;
 }
 
+int sk_timestamping_destroy(int fd, const char *device)
+{
+	return hwts_init(fd, device, 0, 0, HWTSTAMP_CLOCK_TYPE_NONE,
+			 HWTSTAMP_TX_OFF, 0, HWTSTAMP_DELAY_MECHANISM_OFF, 0);
+}
+
 int sk_timestamping_init(int fd, const char *device, int clk_type,
 			 enum timestamp_type type, enum transport_type transport,
 			 int vclock, int domain, enum delay_mechanism dm, int header_offset)
