@@ -32,6 +32,9 @@ static void ts2phc_cleanup(struct ts2phc_private *priv)
 {
 	struct ts2phc_port *p, *tmp;
 
+	if (priv->use_gpio)
+		ts2phc_gpio_release(priv);
+
 	ts2phc_pps_sink_cleanup(priv);
 	if (priv->src)
 		ts2phc_pps_source_destroy(priv->src);
@@ -431,7 +434,7 @@ static int ts2phc_pps_source_implicit_tstamp(struct ts2phc_private *priv,
 	return 0;
 }
 
-static void ts2phc_synchronize_clocks(struct ts2phc_private *priv, int autocfg)
+static void ts2phc_synchronize_clocks(struct ts2phc_private *priv, int autocfg, int use_gpio)
 {
 	tmv_t source_tmv;
 	struct ts2phc_clock *c;
@@ -448,6 +451,8 @@ static void ts2phc_synchronize_clocks(struct ts2phc_private *priv, int autocfg)
 				priv->ref_clock->name);
 			return;
 		}
+	} else if (use_gpio) {
+		source_tmv = priv->ref_clock->last_ts;
 	} else {
 		err = ts2phc_pps_source_implicit_tstamp(priv, &source_tmv);
 		if (err < 0)
@@ -469,6 +474,10 @@ static void ts2phc_synchronize_clocks(struct ts2phc_private *priv, int autocfg)
 		}
 
 		offset = tmv_to_nanoseconds(tmv_sub(ts, source_tmv));
+
+		/* Don't adjust master */
+		if (c == priv->ref_clock)
+			continue;
 
 		if (c->no_adj) {
 			pr_info("%s offset %10" PRId64, c->name,
@@ -567,6 +576,7 @@ int main(int argc, char *argv[])
 	const char *tod_source = NULL;
 	struct config *cfg = NULL;
 	struct interface *iface;
+	int gpio_sleep_us = 0;
 	struct option *opts;
 	int autocfg = 0;
 
@@ -681,6 +691,8 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	priv.use_gpio = config_get_int(cfg, NULL, "ts2phc.use_gpio");
+
 	STAILQ_FOREACH(iface, &cfg->interfaces, list) {
 		const char *dev = interface_name(iface);
 
@@ -713,6 +725,15 @@ int main(int argc, char *argv[])
 			}
 			have_sink = 1;
 		}
+
+		if (priv.use_gpio) {
+			err = ts2phc_gpio_init_port(&priv, cfg, dev);
+			if (err) {
+				ts2phc_cleanup(&priv);
+				return err;
+			}
+
+		}
 	}
 	if (!have_sink) {
 		fprintf(stderr, "no PPS sinks specified\n");
@@ -730,18 +751,32 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	if (!strcasecmp(tod_source, "generic")) {
-		pps_type = TS2PHC_PPS_SOURCE_GENERIC;
-	} else if (!strcasecmp(tod_source, "nmea")) {
-		pps_type = TS2PHC_PPS_SOURCE_NMEA;
+	if (priv.use_gpio) {
+		/* Needs to run after ts2phc_pps_sinks_init */
+		if (!autocfg && !priv.ref_clock) {
+			pr_err("gpio reference clock not found. Set ts2phc.gpio_master or use autocfg (-a)");
+			return -ENODEV;
+		}
+		err = ts2phc_gpio_request_out(&priv, cfg);
+		if (err) {
+			ts2phc_cleanup(&priv);
+			return err;
+		}
+		gpio_sleep_us = config_get_int(cfg, NULL, "ts2phc.gpio_interval_ms") * 1000;
 	} else {
-		pps_type = TS2PHC_PPS_SOURCE_PHC;
-	}
-	priv.src = ts2phc_pps_source_create(&priv, tod_source, pps_type);
-	if (!priv.src) {
-		fprintf(stderr, "failed to create PPS source\n");
-		ts2phc_cleanup(&priv);
-		return -1;
+		if (!strcasecmp(tod_source, "generic")) {
+			pps_type = TS2PHC_PPS_SOURCE_GENERIC;
+		} else if (!strcasecmp(tod_source, "nmea")) {
+			pps_type = TS2PHC_PPS_SOURCE_NMEA;
+		} else {
+			pps_type = TS2PHC_PPS_SOURCE_PHC;
+		}
+		priv.src = ts2phc_pps_source_create(&priv, tod_source, pps_type);
+		if (!priv.src) {
+			fprintf(stderr, "failed to create PPS source\n");
+			ts2phc_cleanup(&priv);
+			return -1;
+		}
 	}
 
 	while (is_running()) {
@@ -762,20 +797,33 @@ int main(int argc, char *argv[])
 		LIST_FOREACH(c, &priv.clocks, list)
 			ts2phc_clock_flush_tstamp(c);
 
+		/* Trigger the pulse from CPU. If polarity==both, keep track of
+		 * which last was and only flip once so we don't get more
+		 * events than needed. Since we can control it we don't need t
+		 * discard the falling edge.
+		 */
+		if (priv.use_gpio)
+			ts2phc_gpio_trigger_pulse(&priv);
+
 		err = ts2phc_pps_sink_poll(&priv);
 		if (err < 0) {
 			pr_err("poll failed");
 			break;
 		}
 		if (err > 0) {
-			err = ts2phc_collect_pps_source_tstamp(&priv);
-			if (err) {
-				pr_err("failed to collect PPS source tstamp");
-				break;
+			/* We should already have the timestamp from sink poll */
+			if (!priv.use_gpio) {
+				err = ts2phc_collect_pps_source_tstamp(&priv);
+				if (err) {
+					pr_err("failed to collect PPS source tstamp");
+					break;
+				}
 			}
 
-			ts2phc_synchronize_clocks(&priv, autocfg);
+			ts2phc_synchronize_clocks(&priv, autocfg, priv.use_gpio);
 		}
+		if (priv.use_gpio)
+			usleep(gpio_sleep_us);
 	}
 
 	ts2phc_cleanup(&priv);
