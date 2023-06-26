@@ -146,9 +146,14 @@ struct ts2phc_pps_source *ts2phc_phc_pps_source_create(struct ts2phc_private *pr
 	pr_debug("PHC PPS source %s has ptp index %d", dev,
 		 s->clock->phc_index);
 
-	if (ts2phc_phc_pps_source_activate(priv->cfg, dev, s)) {
-		ts2phc_phc_pps_source_destroy(&s->pps_source);
-		return NULL;
+	/* When using GPIO, don't activate the PPS since that will be
+	 * controlled by software.
+	 */
+	if (!priv->use_gpio) {
+		if (ts2phc_phc_pps_source_activate(priv->cfg, dev, s)) {
+			ts2phc_phc_pps_source_destroy(&s->pps_source);
+			return NULL;
+		}
 	}
 
 	return &s->pps_source;
