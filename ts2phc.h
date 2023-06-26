@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <sys/queue.h>
 #include <time.h>
+#include <gpiod.h>
 
 #include "pmc_agent.h"
 #include "servo.h"
@@ -34,6 +35,8 @@ struct ts2phc_clock {
 	bool is_target;
 	bool is_ts_available;
 	tmv_t last_ts;
+	struct gpiod_chip *chip;
+	struct gpiod_line *ena_line;
 };
 
 struct ts2phc_port {
@@ -53,6 +56,11 @@ struct ts2phc_private {
 	struct pmc_agent *agent;
 	struct ts2phc_clock *ref_clock;
 	bool state_changed;
+	struct gpiod_chip *chip;
+	struct gpiod_line *line;
+	int use_gpio;
+	int gpio_polarity;
+	int last_edge_rising;
 	LIST_HEAD(port_head, ts2phc_port) ports;
 	LIST_HEAD(clock_head, ts2phc_clock) clocks;
 };

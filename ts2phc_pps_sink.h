@@ -19,4 +19,12 @@ void ts2phc_pps_sink_cleanup(struct ts2phc_private *priv);
 
 int ts2phc_pps_sink_poll(struct ts2phc_private *priv);
 
+int ts2phc_gpio_trigger_pulse(struct ts2phc_private *priv);
+
+int ts2phc_gpio_init_port(struct ts2phc_private *priv, struct config *cfg, const char *dev);
+
+int ts2phc_gpio_request_out(struct ts2phc_private *priv, struct config *cfg);
+
+void ts2phc_gpio_release(struct ts2phc_private *priv);
+
 #endif
