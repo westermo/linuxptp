@@ -30,11 +30,13 @@ enum {
 	SOF_TIMESTAMPING_OPT_STATS = (1<<12),
 	SOF_TIMESTAMPING_OPT_PKTINFO = (1<<13),
 	SOF_TIMESTAMPING_OPT_TX_SWHW = (1<<14),
+#ifdef HAVE_VCLOCKS
 	SOF_TIMESTAMPING_BIND_PHC = (1 << 15),
 
 	SOF_TIMESTAMPING_LAST = SOF_TIMESTAMPING_BIND_PHC,
 	SOF_TIMESTAMPING_MASK = (SOF_TIMESTAMPING_LAST - 1) |
 				 SOF_TIMESTAMPING_LAST
+#endif
 };
 
 /*
@@ -54,10 +56,12 @@ enum {
  * @bind_phc:	Index of PTP virtual clock bound to sock. This is available
  *		if flag SOF_TIMESTAMPING_BIND_PHC is set.
  */
+#ifdef HAVE_VCLOCKS
 struct so_timestamping {
 	int flags;
 	int bind_phc;
 };
+#endif
 
 /**
  * struct hwtstamp_config - %SIOCGHWTSTAMP and %SIOCSHWTSTAMP parameter
@@ -127,7 +131,9 @@ enum hwtstamp_tx_types {
 	 * case, neither transmitted Sync nor PDelay_Resp packets will
 	 * receive a time stamp via the socket error queue.
 	 */
+#ifdef HAVE_ONESTEP_P2P
 	HWTSTAMP_TX_ONESTEP_P2P,
+#endif
 
 	/* add new constants above here */
 	__HWTSTAMP_TX_CNT
