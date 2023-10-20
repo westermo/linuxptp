@@ -369,6 +369,7 @@ struct config_item config_tab[] = {
 	GLOB_ITEM_INT("egress_vlan.tagged", 0, 0, 1),
 	GLOB_ITEM_INT("egress_vlan.id", 0, 0, 4095),
 	GLOB_ITEM_INT("egress_vlan.prio", 0, 0, 7),
+	PORT_ITEM_INT("dummy_pdelay_resp_fup", 0, 0, 1),
 };
 
 static struct unicast_master_table *current_uc_mtab;
