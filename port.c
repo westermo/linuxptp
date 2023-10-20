@@ -2283,6 +2283,13 @@ int process_pdelay_req(struct port *p, struct ptp_message *m)
 		return -1;
 	}
 
+	/* Dummy frame for hardware that can only do p2p1step but needs to do
+	 * normal one-step (two-step for P2P). Send a dummy frame to make it
+	 * look like two-step. The time calculations should still be the same.
+	 */
+	if (p->dummy_pdelay_resp_fup)
+		event = TRANS_P2P1STEP;
+
 	if (p->delayMechanism == DM_E2E) {
 		pr_warning("%s: pdelay_req on E2E port", p->log_name);
 		return 0;
@@ -2338,6 +2345,9 @@ int process_pdelay_req(struct port *p, struct ptp_message *m)
 		rsp->header.correction += p->tx_timestamp_offset;
 		rsp->header.correction += p->rx_timestamp_offset;
 		rsp->header.reserved2  = m->header.reserved2;
+	} else if (p->dummy_pdelay_resp_fup) {
+		rsp->header.reserved2  = m->header.reserved2;
+		rsp->header.flagField[0] |= TWO_STEP;
 	} else {
 		rsp->header.flagField[0] |= TWO_STEP;
 		rsp->pdelay_resp.requestReceiptTimestamp =
@@ -2357,7 +2367,7 @@ int process_pdelay_req(struct port *p, struct ptp_message *m)
 	}
 	if (p->timestamping == TS_P2P1STEP) {
 		goto out;
-	} else if (msg_sots_missing(rsp)) {
+	} else if (!p->dummy_pdelay_resp_fup && msg_sots_missing(rsp)) {
 		pr_err("missing timestamp on transmitted peer delay response");
 		err = -1;
 		goto out;
@@ -2379,8 +2389,9 @@ int process_pdelay_req(struct port *p, struct ptp_message *m)
 
 	fup->pdelay_resp_fup.requestingPortIdentity = m->header.sourcePortIdentity;
 
-	fup->pdelay_resp_fup.responseOriginTimestamp =
-		tmv_to_Timestamp(rsp->hwts.ts);
+	if (!p->dummy_pdelay_resp_fup)
+		fup->pdelay_resp_fup.responseOriginTimestamp =
+			tmv_to_Timestamp(rsp->hwts.ts);
 
 	if (msg_unicast(m)) {
 		fup->address = m->address;
@@ -3329,6 +3340,10 @@ struct port *port_open(const char *phc_device,
 	case CLOCK_TYPE_MANAGEMENT:
 		goto err_log_name;
 	}
+
+	if (timestamping == TS_ONESTEP)
+		p->dummy_pdelay_resp_fup =
+			config_get_int(cfg, interface_name(interface), "dummy_pdelay_resp_fup");
 
 	p->phc_index = config_get_int(cfg, interface_name(interface), "phc_index");
 	if (p->phc_index < 0)

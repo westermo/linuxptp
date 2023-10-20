@@ -164,6 +164,7 @@ struct port {
 	/* slave event monitoring */
 	struct monitor *slave_event_monitor;
 	bool unicast_state_dirty;
+	int dummy_pdelay_resp_fup;
 };
 
 #define portnum(p) (p->portIdentity.portNumber)
