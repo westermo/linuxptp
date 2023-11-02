@@ -23,6 +23,7 @@
 #include <stdbool.h>
 #include "address.h"
 #include "transport.h"
+#include "dm.h"
 
 /**
  * Defines the available Hardware time-stamp setting modes.
@@ -154,11 +155,14 @@ int sk_set_priority(int fd, int family, uint8_t dscp);
  * @param type        The requested flavor of time stamping.
  * @param transport   The type of transport used.
  * @param vclock      Index of the virtual PHC, or -1 for the physical clock.
+ * @param domain      Domain number for offloaded timestamping.
+ * @param delay_mechanism	The delay mechanism used.
+ * @param header_offset		PTP header offset for offloaded timestamping
  * @return            Zero on success, non-zero otherwise.
  */
 int sk_timestamping_init(int fd, const char *device, int clk_type,
 			 enum timestamp_type type, enum transport_type transport,
-			 int vclock);
+			 int vclock, int domain, enum delay_mechanism, int header_offset);
 
 /**
  * Limits the time that RECVMSG(2) will poll while waiting for the tx timestamp
