@@ -168,6 +168,8 @@ static int udp6_open(struct transport *t, struct interface *iface,
 	uint8_t event_dscp, general_dscp;
 	int efd, gfd, hop_limit;
 	enum clock_type clk_type;
+	int domain, header_offset;
+	enum delay_mechanism dm;
 
 	hop_limit = config_get_int(t->cfg, name, "udp_ttl");
 	udp6->mac.len = 0;
@@ -198,8 +200,12 @@ static int udp6_open(struct transport *t, struct interface *iface,
 		goto no_general;
 
 	clk_type = config_get_int(t->cfg, NULL, "hwtstamp_clk_type");
+	domain = config_get_int(t->cfg, NULL, "domainNumber");
+	header_offset = config_get_int(t->cfg, name, "ptp_header_offset");
+	dm = config_get_int(t->cfg, NULL, "delay_mechanism");
 	if (sk_timestamping_init(efd, interface_label(iface), clk_type, ts_type,
-				 TRANS_UDP_IPV6, interface_get_vclock(iface)))
+				 TRANS_UDP_IPV6, interface_get_vclock(iface),
+				 domain, dm, header_offset))
 		goto no_timestamping;
 
 	if (sk_general_init(gfd))
