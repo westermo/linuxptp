@@ -334,6 +334,8 @@ static int raw_open(struct transport *t, struct interface *iface,
 	const char *name;
 	char *str;
 	enum clock_type clk_type;
+	int domain, header_offset;
+	enum delay_mechanism dm;
 
 	name = interface_label(iface);
 	str = config_get_string(t->cfg, name, "ptp_dst_mac");
@@ -370,8 +372,12 @@ static int raw_open(struct transport *t, struct interface *iface,
 		goto no_general;
 
 	clk_type = config_get_int(t->cfg, NULL, "hwtstamp_clk_type");
+	domain = config_get_int(t->cfg, NULL, "domainNumber");
+	header_offset = config_get_int(t->cfg, name, "ptp_header_offset");
+	dm = config_get_int(t->cfg, NULL, "delay_mechanism");
 	if (sk_timestamping_init(efd, name, clk_type, ts_type, TRANS_IEEE_802_3,
-				 interface_get_vclock(iface)))
+				 interface_get_vclock(iface), domain,
+				 dm, header_offset))
 		goto no_timestamping;
 
 	if (sk_general_init(gfd))

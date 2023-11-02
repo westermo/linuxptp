@@ -57,7 +57,8 @@ static void init_ifreq(struct ifreq *ifreq, struct hwtstamp_config *cfg,
 }
 
 static int hwts_init(int fd, const char *device, int rx_filter,
-	int rx_filter2, int clk_type, int tx_type)
+	int rx_filter2, int clk_type, int tx_type, int domain,
+	int delay_mechanism, int header_offset)
 {
 	struct ifreq ifreq;
 	struct hwtstamp_config cfg;
@@ -94,6 +95,9 @@ static int hwts_init(int fd, const char *device, int rx_filter,
 		cfg.tx_type   = tx_type;
 		cfg.rx_filter = HWTSTAMP_FILTER_ALL;
 		cfg.clk_type  = clk_type;
+		cfg.domain    = domain;
+		cfg.delay_mechanism = delay_mechanism;
+		cfg.header_offset = header_offset;
 		err = ioctl(fd, SIOCSHWTSTAMP, &ifreq);
 		if (err < 0) {
 			pr_err("ioctl SIOCSHWTSTAMP failed: %m");
@@ -104,6 +108,9 @@ static int hwts_init(int fd, const char *device, int rx_filter,
 		cfg.tx_type   = tx_type;
 		cfg.rx_filter = orig_rx_filter = rx_filter;
 		cfg.clk_type  = clk_type;
+		cfg.domain    = domain;
+		cfg.delay_mechanism = delay_mechanism;
+		cfg.header_offset = header_offset;
 		err = ioctl(fd, SIOCSHWTSTAMP, &ifreq);
 		if (err < 0) {
 			pr_info("driver rejected most general HWTSTAMP filter");
@@ -560,10 +567,11 @@ int sk_set_priority(int fd, int family, uint8_t dscp)
 
 int sk_timestamping_init(int fd, const char *device, int clk_type,
 			 enum timestamp_type type, enum transport_type transport,
-			 int vclock)
+			 int vclock, int domain, enum delay_mechanism dm, int header_offset)
 {
 	int err, filter1, filter2 = 0, flags, tx_type = HWTSTAMP_TX_ON;
 	struct so_timestamping timestamping;
+	enum hwtstamp_delay_mechanism hw_dm;
 
 	switch (type) {
 	case TS_SOFTWARE:
@@ -618,7 +626,15 @@ int sk_timestamping_init(int fd, const char *device, int clk_type,
 		return -1;
 	}
 
-	err = hwts_init(fd, device, filter1, filter2, clk_type, tx_type);
+	if (dm == DM_E2E)
+		hw_dm = HWTSTAMP_DELAY_MECHANISM_E2E;
+	else if (dm == DM_P2P)
+		hw_dm = HWTSTAMP_DELAY_MECHANISM_P2P;
+	else
+		hw_dm = HWTSTAMP_DELAY_MECHANISM_OFF;
+
+	err = hwts_init(fd, device, filter1, filter2, clk_type, tx_type,
+			domain, hw_dm, header_offset);
 	if (err && !(type == TS_SOFTWARE && errno == ENOTSUP))
 		return err;
 
