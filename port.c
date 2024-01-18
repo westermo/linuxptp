@@ -2348,6 +2348,8 @@ int process_pdelay_req(struct port *p, struct ptp_message *m)
 		rsp->header.correction += p->rx_timestamp_offset;
 		rsp->header.reserved2  = m->header.reserved2;
 	} else if (p->dummy_pdelay_resp_fup) {
+		rsp->header.correction += p->tx_timestamp_offset;
+		rsp->header.correction += p->rx_timestamp_offset;
 		rsp->header.reserved2  = m->header.reserved2;
 		rsp->header.flagField[0] |= TWO_STEP;
 	} else {
