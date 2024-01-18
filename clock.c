@@ -148,6 +148,8 @@ struct clock {
 	int step_window_counter;
 	int step_window;
 	struct time_zone tz[MAX_TIME_ZONES];
+	int tc_syntonize;
+	double freq;
 };
 
 struct clock the_clock;
@@ -804,6 +806,15 @@ static enum servo_state clock_no_adjust(struct clock *c, tmv_t ingress,
 	if (c->stats.max_count > 1) {
 		clock_stats_update(&c->stats, tmv_dbl(c->master_offset), freq);
 	} else {
+		/* When doing onestep TC we skip over compensating for the neighbour
+		 * clock frequency in `tc_fwd_event`. Instead actually syntonize the
+		 * clock in HW.
+		 */
+		if (c->tc_syntonize) {
+			c->freq = c->freq - freq;
+			clockadj_set_freq(c->clkid, c->freq);
+		}
+
 		pr_info("master offset %10" PRId64 " s%d freq %+7.0f "
 			"path delay %9" PRId64,
 			tmv_to_nanoseconds(c->master_offset), state, freq,
@@ -1199,9 +1210,10 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 	iface = STAILQ_FIRST(&config->interfaces);
 
 	conf_phc_index = config_get_int(config, interface_name(iface), "phc_index");
+	c->tc_syntonize = config_get_int(config, NULL, "tc_syntonize");
 
 	/* determine PHC Clock index */
-	if (config_get_int(config, NULL, "free_running")) {
+	if (config_get_int(config, NULL, "free_running") && !c->tc_syntonize) {
 		phc_index = -1;
 	} else if (timestamping == TS_SOFTWARE || timestamping == TS_LEGACY_HW) {
 		phc_index = -1;
@@ -1288,7 +1300,7 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 	c->time_source = config_get_int(config, NULL, "timeSource");
 	c->step_window = config_get_int(config, NULL, "step_window");
 
-	if (c->free_running) {
+	if (c->free_running && !c->tc_syntonize) {
 		c->clkid = CLOCK_INVALID;
 		if (timestamping == TS_SOFTWARE || timestamping == TS_LEGACY_HW) {
 			c->utc_timescale = 1;
@@ -1327,6 +1339,7 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 
 	if (c->clkid != CLOCK_INVALID) {
 		fadj = clockadj_get_freq(c->clkid);
+		c->freq = fadj;
 		/* Disable write phase mode if not implemented by driver */
 		if (c->write_phase_mode && !phc_has_writephase(c->clkid)) {
 			pr_err("clock does not support write phase mode");
