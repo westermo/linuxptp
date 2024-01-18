@@ -1751,6 +1751,11 @@ int port_tx_sync(struct port *p, struct address *dst, uint16_t sequence_id)
 
 	if (p->timestamping != TS_ONESTEP && p->timestamping != TS_P2P1STEP) {
 		msg->header.flagField[0] |= TWO_STEP;
+	} else {
+		/* It seems to assume corrections should be done in hardware
+		 * for onestep sync. Let's try in software.
+		 */
+		msg->header.correction = p->tx_timestamp_offset;
 	}
 
 	if (dst) {
