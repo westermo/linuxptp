@@ -293,9 +293,12 @@ static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 		if (tc_blocked(q, p, msg)) {
 			continue;
 		}
-		if ((q->timestamping == TS_P2P1STEP) && (msg_type(msg) == SYNC)) {
+		// Should this happen for DELAY_REQ/RESP too? At least the asymmetry and offset
+		if ((q->timestamping >= TS_ONESTEP) && (msg_type(msg) == SYNC)) {
 			corr = tmv_to_TimeInterval(q->peer_delay);
 			corr += q->asymmetry;
+			corr += q->rx_timestamp_offset;
+			corr += p->tx_timestamp_offset;
 			msg->header.correction += host2net64(corr);
 		}
 		cnt = transport_send(p->trp, &p->fda, TRANS_DEFER_EVENT, msg);
