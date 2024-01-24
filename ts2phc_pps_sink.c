@@ -448,6 +448,63 @@ static int ts2phc_pps_sink_get_polarity(struct ts2phc_private *priv)
 	return -1;
 }
 
+/* From libgpiod examples/toggle_line_value.c */
+static struct gpiod_line_request *
+request_output_line(const char *chip_path, unsigned int offset,
+		    enum gpiod_line_value value, const char *consumer)
+{
+	struct gpiod_request_config *req_cfg = NULL;
+	struct gpiod_line_request *request = NULL;
+	struct gpiod_line_settings *settings;
+	struct gpiod_line_config *line_cfg;
+	struct gpiod_chip *chip;
+	int ret;
+
+	chip = gpiod_chip_open(chip_path);
+	if (!chip)
+		return NULL;
+
+	settings = gpiod_line_settings_new();
+	if (!settings)
+		goto close_chip;
+
+	gpiod_line_settings_set_direction(settings,
+					  GPIOD_LINE_DIRECTION_OUTPUT);
+	gpiod_line_settings_set_output_value(settings, value);
+
+	line_cfg = gpiod_line_config_new();
+	if (!line_cfg)
+		goto free_settings;
+
+	ret = gpiod_line_config_add_line_settings(line_cfg, &offset, 1,
+						  settings);
+	if (ret)
+		goto free_line_config;
+
+	if (consumer) {
+		req_cfg = gpiod_request_config_new();
+		if (!req_cfg)
+			goto free_line_config;
+
+		gpiod_request_config_set_consumer(req_cfg, consumer);
+	}
+
+	request = gpiod_chip_request_lines(chip, req_cfg, line_cfg);
+
+	gpiod_request_config_free(req_cfg);
+
+free_line_config:
+	gpiod_line_config_free(line_cfg);
+
+free_settings:
+	gpiod_line_settings_free(settings);
+
+close_chip:
+	gpiod_chip_close(chip);
+
+	return request;
+}
+
 int ts2phc_gpio_trigger_pulse(struct ts2phc_private *priv)
 {
 	int polarity;
@@ -455,16 +512,17 @@ int ts2phc_gpio_trigger_pulse(struct ts2phc_private *priv)
 
 	polarity = priv->gpio_polarity;
 	if (polarity == (PTP_RISING_EDGE | PTP_FALLING_EDGE)) {
-		gpiod_line_set_value(priv->line, priv->last_edge_rising ? 0 : 1);
-		priv->last_edge_rising = priv->last_edge_rising ? 0 : 1;
+		gpiod_line_request_set_value(priv->request, priv->gpio_line,
+					     priv->last_edge_rising ? GPIOD_LINE_VALUE_INACTIVE : GPIOD_LINE_VALUE_ACTIVE);
+		priv->last_edge_rising = priv->last_edge_rising ? GPIOD_LINE_VALUE_INACTIVE : GPIOD_LINE_VALUE_ACTIVE;
 	} else if (polarity == PTP_RISING_EDGE) {
-		gpiod_line_set_value(priv->line, 0);
+		gpiod_line_request_set_value(priv->request, priv->gpio_line, GPIOD_LINE_VALUE_INACTIVE);
 		usleep(1000);
-		gpiod_line_set_value(priv->line, 1);
+		gpiod_line_request_set_value(priv->request, priv->gpio_line, GPIOD_LINE_VALUE_ACTIVE);
 		usleep(1000);
 	} else if (polarity == PTP_FALLING_EDGE) {
-		gpiod_line_set_value(priv->line, 1);
-		gpiod_line_set_value(priv->line, 0);
+		gpiod_line_request_set_value(priv->request, priv->gpio_line, GPIOD_LINE_VALUE_ACTIVE);
+		gpiod_line_request_set_value(priv->request, priv->gpio_line, GPIOD_LINE_VALUE_INACTIVE);
 	}
 	return err;
 }
@@ -473,9 +531,9 @@ int ts2phc_gpio_init_port(struct ts2phc_private *priv, struct config *cfg, const
 {
 	struct ts2phc_pps_sink *sink;
 	struct ts2phc_clock *clock;
-	int err, found = 0;
+	int found = 0;
+	char chippath[100];
 	char *chipname;
-	int ena_pin;
 
 	STAILQ_FOREACH(sink, &priv->sinks, list) {
 		if (0 == strcmp(dev, sink->name)) {
@@ -493,39 +551,29 @@ int ts2phc_gpio_init_port(struct ts2phc_private *priv, struct config *cfg, const
 		priv->ref_clock = clock;
 
 	chipname = config_get_string(cfg, dev, "ts2phc.gpio_enable_chip");
-	ena_pin = config_get_int(cfg, dev, "ts2phc.gpio_enable_pin");
+	clock->gpio_line = config_get_int(cfg, dev, "ts2phc.gpio_enable_pin");
 
 	if (chipname == NULL) {
 		pr_warning("warning: no gpio_enable_chip provided. Ignore if HW does not need to enable gpio access");
 		return 0;
 	}
 
-	if (ena_pin == -1) {
+	if (clock->gpio_line == -1) {
 		pr_err("gpio_enable_chip used without corresponding gpio_enable_pin");
 		return -EINVAL;
 	}
 
-	clock->chip = gpiod_chip_open_by_name(chipname);
-	if (!clock->chip) {
-		pr_err("could not open chipname %s\n", chipname);
-		return -ENODEV;
-	}
+	snprintf(chippath, 100, "/dev/%s", chipname);
 
-	clock->ena_line = gpiod_chip_get_line(clock->chip, ena_pin);
-	if (!clock->ena_line) {
-		pr_err("could not get gpio line %d on chip %s\n", ena_pin, chipname);
-		return -ENODEV;
-	}
+	clock->request = request_output_line(chippath, clock->gpio_line, GPIOD_LINE_VALUE_ACTIVE, "ts2phc");
 
-	/* Default to 1 so it is enabled immediately */
-	err = gpiod_line_request_output(clock->ena_line, "ts2phc", 1);
-	if (err) {
+	if (!clock->request) {
 		/* If multiple PTP clocks share the same enable pin this is
 		 * expected. And the pin should have been enabled by the first
 		 * clock that runs this function.
 		 */
 		pr_warning("warning: chip %s line %d could not be requested. May be shared between the clocks\n",
-			   chipname, ena_pin);
+			   chipname, clock->gpio_line);
 	}
 	return 0;
 }
@@ -533,42 +581,33 @@ int ts2phc_gpio_init_port(struct ts2phc_private *priv, struct config *cfg, const
 int ts2phc_gpio_request_out(struct ts2phc_private *priv, struct config *cfg)
 {
 	char *chipname;
+	char chippath[100];
 	int default_value;
-	int out_pin;
-	int err;
 
 	priv->gpio_polarity = ts2phc_pps_sink_get_polarity(priv);
 	chipname = config_get_string(cfg, NULL, "ts2phc.gpio_chip");
-	out_pin = config_get_int(cfg, NULL, "ts2phc.gpio_pin");
+	priv->gpio_line = config_get_int(cfg, NULL, "ts2phc.gpio_pin");
 
 	if (chipname == NULL) {
 		pr_err("warning: no gpio_chip provided");
 		return -EINVAL;
 	}
 
-	if (out_pin == -1) {
+	if (priv->gpio_line == -1) {
 		pr_err("gpio_chip used without corresponding gpio_pin");
 		return -EINVAL;
 	}
 
-	priv->chip = gpiod_chip_open_by_name(chipname);
-	if (!priv->chip) {
-		pr_err("%s: could not open chipname %s\n", __func__, chipname);
-		return -ENODEV;
-	}
+	snprintf(chippath, 100, "/dev/%s", chipname);
 
-	priv->line = gpiod_chip_get_line(priv->chip, out_pin);
-	if (!priv->line) {
-		pr_err("%s: could not get gpio line %d on chip %s\n", __func__, out_pin, chipname);
-		return -ENODEV;
-	}
+	default_value = priv->gpio_polarity & PTP_RISING_EDGE ? GPIOD_LINE_VALUE_INACTIVE : GPIOD_LINE_VALUE_ACTIVE;
+
+	priv->request = request_output_line(chippath, priv->gpio_line, default_value, "ts2phc");
 
 	/* If rising/both then default to 0. If falling default to 1. */
-	default_value = priv->gpio_polarity & PTP_RISING_EDGE ? 0 : 1;
-	err = gpiod_line_request_output(priv->line, "ts2phc", default_value);
-	if (err) {
+	if (!priv->request) {
 		pr_err("chip %s line %d could not be requested\n",
-		       chipname, out_pin);
+		       chipname, priv->gpio_line);
 		return -ENODEV;
 	}
 	return 0;
@@ -578,15 +617,15 @@ void ts2phc_gpio_release(struct ts2phc_private *priv)
 {
 	struct ts2phc_pps_sink *sink;
 
-	if (priv->line) {
-		gpiod_line_set_value(priv->line, 0);
-		gpiod_line_release(priv->line);
+	if (priv->request) {
+		gpiod_line_request_set_value(priv->request, priv->gpio_line, GPIOD_LINE_VALUE_INACTIVE);
+		gpiod_line_request_release(priv->request);
 	}
 
 	STAILQ_FOREACH(sink, &priv->sinks, list) {
-		if (sink->clock->ena_line) {
-			gpiod_line_set_value(sink->clock->ena_line, 0);
-			gpiod_line_release(sink->clock->ena_line);
+		if (sink->clock->request) {
+			gpiod_line_request_set_value(sink->clock->request, sink->clock->gpio_line, GPIOD_LINE_VALUE_INACTIVE);
+			gpiod_line_request_release(sink->clock->request);
 		}
 	}
 }
