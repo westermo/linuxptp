@@ -35,8 +35,8 @@ struct ts2phc_clock {
 	bool is_target;
 	bool is_ts_available;
 	tmv_t last_ts;
-	struct gpiod_chip *chip;
-	struct gpiod_line *ena_line;
+	struct gpiod_line_request *request;
+	int gpio_line;
 };
 
 struct ts2phc_port {
@@ -56,8 +56,8 @@ struct ts2phc_private {
 	struct pmc_agent *agent;
 	struct ts2phc_clock *ref_clock;
 	bool state_changed;
-	struct gpiod_chip *chip;
-	struct gpiod_line *line;
+	struct gpiod_line_request *request;
+	int gpio_line;
 	int use_gpio;
 	int gpio_polarity;
 	int last_edge_rising;
