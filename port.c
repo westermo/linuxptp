@@ -3352,6 +3352,8 @@ struct port *port_open(const char *phc_device,
 	p->bmca = config_get_int(cfg, interface_name(interface), "BMCA");
 	p->trp = transport_create(cfg, config_get_int(cfg,
 			      interface_name(interface), "network_transport"));
+	p->prp_lan = config_get_int(cfg, interface_name(interface), "prp_lan");
+
 	if (!p->trp) {
 		goto err_log_name;
 	}
@@ -3572,5 +3574,46 @@ void port_update_unicast_state(struct port *p)
 	if (p->unicast_state_dirty) {
 		unicast_client_state_changed(p);
 		p->unicast_state_dirty = false;
+	}
+}
+
+int port_prp_is_lan_a(struct port *p)
+{
+	return p->prp_lan == 0xA;
+}
+
+int port_prp_is_lan_b(struct port *p)
+{
+	return p->prp_lan == 0xB;
+}
+
+int port_prp_is_other_lan(struct port *p, struct port *q)
+{
+	if (!prp_mode(p->clock))
+		return false;
+
+	return (p->prp_lan == 0xA && q->prp_lan == 0xB) || (p->prp_lan == 0xB && q->prp_lan == 0xA);
+}
+
+/* Port that was received from. Modify the outgoing packets that
+ * originated from said port to indicate whether it was received on
+ * LAN A or LAN B.
+ *
+ * > When the message is received over Port A, bit 13 and bit 12 are set
+ * > to "10", when the message is received over Port B, bit 13 and bit
+ * > 12 are set to "11".
+ * -- IEC62439-3 2021, A.2.6.4.1 PRP-SAN RedBox as TC - principle
+ */
+void port_prp_set_port_number_bits(struct port *p, struct ptp_message *msg)
+{
+	if (!prp_mode(p->clock))
+		return;
+
+	if (port_prp_is_lan_a(p)) {
+		msg->header.sourcePortIdentity.portNumber |= htons(0b10 << 12);
+		/* pr_err("casan: setting portnumber LAN A. %x", msg->header.sourcePortIdentity.portNumber); */
+	} else if (port_prp_is_lan_b(p)) {
+		msg->header.sourcePortIdentity.portNumber |= htons(0b11 << 12);
+		/* pr_err("casan: setting portnumber LAN B. %x", msg->header.sourcePortIdentity.portNumber); */
 	}
 }

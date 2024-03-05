@@ -150,6 +150,7 @@ struct clock {
 	struct time_zone tz[MAX_TIME_ZONES];
 	int tc_syntonize;
 	double freq;
+	int prp_mode;
 };
 
 struct clock the_clock;
@@ -1098,6 +1099,7 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 	unsigned char oui[OUI_LEN];
 	struct interface *iface;
 	struct timespec ts;
+	bool has_lan_a = false, has_lan_b = false;
 
 	clock_gettime(CLOCK_REALTIME, &ts);
 	srandom(ts.tv_sec ^ ts.tv_nsec);
@@ -1433,6 +1435,8 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 		return NULL;
 	}
 
+	c->prp_mode = config_get_int(config, NULL, "prp_mode");
+
 	/* Create the ports. */
 	STAILQ_FOREACH(iface, &config->interfaces, list) {
 		if (clock_add_port(c, phc_device, phc_index, timestamping, iface)) {
@@ -1442,6 +1446,25 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 	}
 
 	c->dds.numberPorts = c->nports;
+
+	if (c->prp_mode) {
+		LIST_FOREACH(p, &c->ports, list) {
+			if (port_prp_is_lan_a(p))
+				has_lan_a = true;
+			if (port_prp_is_lan_b(p))
+				has_lan_b = true;
+		}
+
+		if (!has_lan_a) {
+			pr_err("PRP mode: LAN A not set");
+			return NULL;
+		}
+		if (!has_lan_b) {
+			pr_err("PRP mode: LAN B not set");
+			return NULL;
+		}
+	}
+
 
 	LIST_FOREACH(p, &c->ports, list) {
 		port_dispatch(p, EV_INITIALIZE, 0);
@@ -2318,4 +2341,9 @@ struct servo *clock_servo(struct clock *c)
 enum servo_state clock_servo_state(struct clock *c)
 {
 	return c->servo_state;
+}
+
+bool prp_mode(struct clock *c)
+{
+	return c->prp_mode;
 }

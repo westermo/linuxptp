@@ -430,4 +430,11 @@ void clock_check_ts(struct clock *c, uint64_t ts);
  */
 double clock_rate_ratio(struct clock *c);
 
+/**
+ * Check if the clock uses PRP mode
+ * @param c  The clock instance.
+ * @return   True or False
+ */
+bool prp_mode(struct clock *c);
+
 #endif

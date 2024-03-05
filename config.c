@@ -379,6 +379,8 @@ struct config_item config_tab[] = {
 	PORT_ITEM_INT("dummy_pdelay_resp_fup", 0, 0, 1),
 	PORT_ITEM_INT("ptp_header_offset", 0, 0, INT_MAX),
 	GLOB_ITEM_INT("tc_syntonize", 0, 0, 1),
+	GLOB_ITEM_INT("prp_mode", 0, 0, 1),
+	PORT_ITEM_INT("prp_lan", 0, 0, 0xB),
 };
 
 static struct unicast_master_table *current_uc_mtab;

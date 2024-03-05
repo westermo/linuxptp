@@ -61,6 +61,9 @@ static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 	if (portnum(p) == 0) {
 		return 1;
 	}
+	if (port_prp_is_other_lan(q, p)) {
+		return 1;
+	}
 	if (!q->tc_spanning_tree) {
 		return 0;
 	}
@@ -288,6 +291,8 @@ static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 
 	clock_gettime(CLOCK_MONOTONIC, &msg->ts.host);
 
+	port_prp_set_port_number_bits(q, msg);
+
 	/* First send the event message out. */
 	for (p = clock_first_port(q->clock); p; p = LIST_NEXT(p, list)) {
 		if (tc_blocked(q, p, msg)) {
@@ -473,6 +478,8 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 		msg->announce.stepsRemoved = htons(1 + steps_removed);
 	}
 
+	port_prp_set_port_number_bits(q, msg);
+
 	for (p = clock_first_port(q->clock); p; p = LIST_NEXT(p, list)) {
 		if (tc_blocked(q, p, msg)) {
 			continue;
@@ -493,6 +500,8 @@ int tc_fwd_folup(struct port *q, struct ptp_message *msg)
 
 	clock_gettime(CLOCK_MONOTONIC, &msg->ts.host);
 
+	port_prp_set_port_number_bits(q, msg);
+
 	for (p = clock_first_port(q->clock); p; p = LIST_NEXT(p, list)) {
 		if (tc_blocked(q, p, msg)) {
 			continue;
@@ -512,6 +521,8 @@ int tc_fwd_response(struct port *q, struct ptp_message *msg)
 	struct port *p;
 
 	clock_gettime(CLOCK_MONOTONIC, &msg->ts.host);
+
+	port_prp_set_port_number_bits(q, msg);
 
 	for (p = clock_first_port(q->clock); p; p = LIST_NEXT(p, list)) {
 		if (tc_blocked(q, p, msg)) {

@@ -364,4 +364,9 @@ void tc_cleanup(void);
  */
 void port_update_unicast_state(struct port *p);
 
+int port_prp_is_lan_a(struct port *p);
+int port_prp_is_lan_b(struct port *p);
+int port_prp_is_other_lan(struct port *p, struct port *q);
+void port_prp_set_port_number_bits(struct port *p, struct ptp_message *msg);
+
 #endif
