@@ -43,6 +43,12 @@ enum clock_type {
 	CLOCK_TYPE_MANAGEMENT = 0x0800,
 };
 
+enum hsr_prp_mode {
+	HSR_PRP_MODE_NONE,
+	HSR_PRP_MODE_HSR,
+	HSR_PRP_MODE_PRP,
+};
+
 /**
  * Appends the active time zone TLVs to a given message.
  * @param c          The clock instance.

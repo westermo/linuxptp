@@ -150,6 +150,7 @@ struct clock {
 	struct time_zone tz[MAX_TIME_ZONES];
 	int tc_syntonize;
 	double freq;
+	enum hsr_prp_mode hsr_prp_mode;
 };
 
 struct clock the_clock;
@@ -1109,6 +1110,8 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 	unsigned char oui[OUI_LEN];
 	struct interface *iface;
 	struct timespec ts;
+	struct port *port_a = NULL;
+	struct port *port_b = NULL;
 
 	clock_gettime(CLOCK_REALTIME, &ts);
 	srandom(ts.tv_sec ^ ts.tv_nsec);
@@ -1453,6 +1456,18 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 	}
 
 	c->dds.numberPorts = c->nports;
+
+	c->hsr_prp_mode = config_get_int(config, NULL, "hsr_prp_mode");
+
+	if (c->hsr_prp_mode != HSR_PRP_MODE_NONE) {
+		LIST_FOREACH(p, &c->ports, list) {
+			if (port_hsr_prp_a(p))
+				port_a = p;
+			else if (port_hsr_prp_b(p))
+				port_b = p;
+		}
+		port_set_paired(port_a, port_b);
+	}
 
 	LIST_FOREACH(p, &c->ports, list) {
 		port_dispatch(p, EV_INITIALIZE, 0);

@@ -364,4 +364,9 @@ void tc_cleanup(void);
  */
 void port_update_unicast_state(struct port *p);
 
+bool port_hsr_prp_a(struct port *p);
+bool port_hsr_prp_b(struct port *p);
+void port_set_paired(struct port *p, struct port *partner);
+struct port *port_get_paired(struct port *p);
+
 #endif

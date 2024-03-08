@@ -3495,6 +3495,10 @@ struct port *port_open(const char *phc_device,
 			goto err_tsproc;
 		}
 	}
+
+	p->hsr_prp_port_a = config_get_int(cfg, p->name, "hsr_prp_port_a");
+	p->hsr_prp_port_b = config_get_int(cfg, p->name, "hsr_prp_port_b");
+
 	return p;
 
 err_tsproc:
@@ -3525,6 +3529,7 @@ enum delay_mechanism port_delay_mechanism(struct port *port)
 int port_state_update(struct port *p, enum fsm_event event, int mdiff)
 {
 	enum port_state next = p->state_machine(p->state, event, mdiff);
+
 
 	if (PS_FAULTY == next) {
 		struct fault_interval i;
@@ -3577,4 +3582,25 @@ void port_update_unicast_state(struct port *p)
 		unicast_client_state_changed(p);
 		p->unicast_state_dirty = false;
 	}
+}
+
+bool port_hsr_prp_a(struct port *p)
+{
+	return p->hsr_prp_port_a;
+}
+
+bool port_hsr_prp_b(struct port *p)
+{
+	return p->hsr_prp_port_b;
+}
+
+void port_set_paired(struct port *p, struct port *q)
+{
+	p->paired_port = q;
+	q->paired_port = p;
+}
+
+struct port *port_get_paired(struct port *p)
+{
+	return p->paired_port;
 }
