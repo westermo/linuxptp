@@ -165,6 +165,9 @@ struct port {
 	struct monitor *slave_event_monitor;
 	bool unicast_state_dirty;
 	int dummy_pdelay_resp_fup;
+        bool hsr_prp_port_a;
+        bool hsr_prp_port_b;
+	struct port *paired_port;
 };
 
 #define portnum(p) (p->portIdentity.portNumber)

@@ -234,6 +234,13 @@ static struct config_enum bmca_enu[] = {
 	{ NULL, 0 },
 };
 
+static struct config_enum hsr_prp_enu[] = {
+	{ "none", HSR_PRP_MODE_NONE},
+	{ "hsr",  HSR_PRP_MODE_HSR},
+	{ "prp",  HSR_PRP_MODE_PRP},
+	{ NULL, 0 },
+};
+
 struct config_item config_tab[] = {
 	PORT_ITEM_INT("allowedLostResponses", 3, 1, 255),
 	PORT_ITEM_INT("announceReceiptTimeout", 3, 2, UINT8_MAX),
@@ -381,6 +388,9 @@ struct config_item config_tab[] = {
 	PORT_ITEM_INT("dummy_pdelay_resp_fup", 0, 0, 1),
 	PORT_ITEM_INT("ptp_header_offset", 0, 0, INT_MAX),
 	GLOB_ITEM_INT("tc_syntonize", 0, 0, 1),
+	GLOB_ITEM_ENU("hsr_prp_mode", HSR_PRP_MODE_NONE, hsr_prp_enu), 
+	PORT_ITEM_INT("hsr_prp_port_a", 0, 0, 1),
+	PORT_ITEM_INT("hsr_prp_port_b", 0, 0, 1),
 };
 
 static struct unicast_master_table *current_uc_mtab;
