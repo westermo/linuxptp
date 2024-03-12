@@ -18,6 +18,8 @@
  */
 #include <stdlib.h>
 
+#include "clock.h"
+#include "fsm.h"
 #include "port.h"
 #include "print.h"
 #include "tc.h"
@@ -51,7 +53,7 @@ static struct tc_txd *tc_allocate(void)
 	return txd;
 }
 
-static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
+int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 {
 	enum port_state s;
 
@@ -61,7 +63,7 @@ static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 	if (portnum(p) == 0) {
 		return 1;
 	}
-	if (!q->tc_spanning_tree) {
+	if (!q->tc_spanning_tree && !clock_is_hsr(p->clock)) {
 		return 0;
 	}
 	/* Forward frames in the wrong domain unconditionally. */
@@ -74,6 +76,13 @@ static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 
 	/* Ingress state */
 	s = port_state(q);
+	if (clock_is_hsr(q->clock)) {
+		if (s != PS_INITIALIZING && s != PS_FAULTY) {
+			goto egress;
+		} else {
+			return 1;
+		}
+	}
 	switch (s) {
 	case PS_INITIALIZING:
 	case PS_FAULTY:
@@ -81,6 +90,7 @@ static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 	case PS_LISTENING:
 	case PS_PRE_MASTER:
 	case PS_PASSIVE:
+	case PS_PASSIVE_SLAVE:
 		return 1;
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
@@ -101,6 +111,13 @@ static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 egress:
 	/* Egress state */
 	s = port_state(p);
+	if (clock_is_hsr(p->clock)) {
+		if (s != PS_INITIALIZING && s != PS_FAULTY) {
+			goto out;
+		} else {
+			return 1;
+		}
+	}
 	switch (s) {
 	case PS_INITIALIZING:
 	case PS_FAULTY:
@@ -108,6 +125,7 @@ egress:
 	case PS_LISTENING:
 	case PS_PRE_MASTER:
 	case PS_PASSIVE:
+	case PS_PASSIVE_SLAVE:
 		return 1;
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
@@ -129,6 +147,8 @@ egress:
 		}
 		break;
 	}
+
+out:
 	return 0;
 }
 

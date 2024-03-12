@@ -109,4 +109,6 @@ int tc_ignore(struct port *q, struct ptp_message *m);
  */
 void tc_prune(struct port *q);
 
+int tc_blocked(struct port *q, struct port *p, struct ptp_message *m);
+
 #endif

@@ -80,6 +80,9 @@ enum port_state ptp_fsm(enum port_state state, enum fsm_event event, int mdiff)
 		case EV_RS_PASSIVE:
 			next = PS_PASSIVE;
 			break;
+		case EV_RS_PSLAVE:
+			    next = PS_PASSIVE_SLAVE;
+			break;
 		default:
 			break;
 		}
@@ -102,6 +105,9 @@ enum port_state ptp_fsm(enum port_state state, enum fsm_event event, int mdiff)
 		case EV_RS_PASSIVE:
 			next = PS_PASSIVE;
 			break;
+		case EV_RS_PSLAVE:
+			    next = PS_PASSIVE_SLAVE;
+			break;
 		default:
 			break;
 		}
@@ -121,6 +127,9 @@ enum port_state ptp_fsm(enum port_state state, enum fsm_event event, int mdiff)
 			break;
 		case EV_RS_PASSIVE:
 			next = PS_PASSIVE;
+			break;
+		case EV_RS_PSLAVE:
+			    next = PS_PASSIVE_SLAVE;
 			break;
 		default:
 			break;
@@ -178,6 +187,9 @@ enum port_state ptp_fsm(enum port_state state, enum fsm_event event, int mdiff)
 		case EV_RS_PASSIVE:
 			next = PS_PASSIVE;
 			break;
+		case EV_RS_PSLAVE:
+			    next = PS_PASSIVE_SLAVE;
+			break;
 		default:
 			break;
 		}
@@ -210,10 +222,27 @@ enum port_state ptp_fsm(enum port_state state, enum fsm_event event, int mdiff)
 		case EV_RS_PASSIVE:
 			next = PS_PASSIVE;
 			break;
+		case EV_RS_PSLAVE:
+			    next = PS_PASSIVE_SLAVE;
+			break;
 		default:
 			break;
 		}
 		break;
+	case PS_PASSIVE_SLAVE:
+		switch (event) {
+		case EV_RS_MASTER:
+			next = PS_PRE_MASTER;
+			break;
+		case EV_RS_PASSIVE:
+			next = PS_PASSIVE;
+			break;
+		case EV_RS_SLAVE:
+			next = PS_UNCALIBRATED;
+			break;
+		default:
+			break;
+		}
 	}
 
 	return next;
