@@ -20,6 +20,7 @@
 
 #include "bmc.h"
 #include "ds.h"
+#include "print.h"
 
 static int portid_cmp(struct PortIdentity *a, struct PortIdentity *b)
 {
@@ -126,6 +127,55 @@ int dscmp(struct dataset *a, struct dataset *b)
 	return diff < 0 ? A_BETTER : B_BETTER;
 }
 
+static enum port_state hsr_state_decision(struct clock *c, struct port *r,
+					  int (*compare)(struct dataset *a, struct dataset *b))
+{
+	struct dataset *clock_best, *port_best, *pair_best;
+	struct port *q;
+
+	q = port_get_paired(r);
+	clock_best = clock_best_foreign(c);
+	port_best = port_best_foreign(r);
+	pair_best = port_best_foreign(q);
+
+	/* IEC62439-3: A.5.4. b) and c). SLAVE */
+	if (compare(port_best, clock_best) == 0 || compare(pair_best, clock_best) == 0) {
+		if (compare(port_best, pair_best) > 0) {
+			return PS_SLAVE;
+		} else {
+			return PS_PASSIVE_SLAVE;
+		}
+	}
+
+	if (!port_best && !pair_best) {
+		return PS_MASTER;
+	}
+
+	int res1 = compare(clock_best, port_best);
+	int res2 = compare(clock_best, pair_best);
+
+	/* The primary Master should have res1 and res2 as
+	 * A_BETTER. Redundant Master should have one or both as
+	 * A_BETTER_TOPO, in case of one link being broken that
+	 * one will be A_BETTER.
+	 */
+	if (res1 > 0 && res2 > 0) {
+		/* /\* IEC62439-3: A.5.4. a) Active MASTER *\/ */
+		if (res1 == A_BETTER && res2 == A_BETTER) {
+			return PS_MASTER;
+		}
+		/* IEC62439-3: A.5.4. d) Redundant MASTER */
+		return PS_PASSIVE;
+	}
+	/* IEC62439-3: A.5.4. d) Redundant MASTER */
+	if (compare(port_best, pair_best) != 0) {
+		return PS_PASSIVE;
+	}
+
+	pr_err("HSR BMC state decision failed %s", port_log_name(r));
+	return PS_FAULTY; /* Not sure what to do here. Throw FAULTY for now. */
+}
+
 enum port_state bmc_state_decision(struct clock *c, struct port *r,
 				   int (*compare)(struct dataset *a, struct dataset *b))
 {
@@ -150,6 +200,10 @@ enum port_state bmc_state_decision(struct clock *c, struct port *r,
 
 	if (!port_best && PS_LISTENING == ps)
 		return ps;
+
+	if (clock_is_hsr(c) && port_get_paired(r)) {
+		return hsr_state_decision(c, r, compare);
+	}
 
 	if (clock_class(c) <= 127) {
 		if (compare(clock_ds, port_best) > 0) {

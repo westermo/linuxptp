@@ -1828,6 +1828,7 @@ int port_is_enabled(struct port *p)
 	case PS_PASSIVE:
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
+	case PS_PASSIVE_SLAVE:
 		break;
 	}
 	return 1;
@@ -2096,6 +2097,7 @@ int process_announce(struct port *p, struct ptp_message *m)
 	case PS_PRE_MASTER:
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
+	case PS_PASSIVE_SLAVE:
 		result = add_foreign_master(p, m);
 		break;
 	case PS_PASSIVE:
@@ -2737,12 +2739,20 @@ static void port_p2p_transition(struct port *p, enum port_state next)
 		break;
 	case PS_PASSIVE:
 		port_set_announce_tmo(p);
+		if (clock_is_hsr(p->clock)) {
+			if (!p->inhibit_announce) {
+				set_tmo_log(p->fda.fd[FD_MANNO_TIMER], 1, -10); /*~1ms*/
+			}
+		}
 		break;
 	case PS_UNCALIBRATED:
 		flush_last_sync(p);
 		flush_peer_delay(p);
 		/* fall through */
 	case PS_SLAVE:
+		port_set_announce_tmo(p);
+		break;
+	case PS_PASSIVE_SLAVE:
 		port_set_announce_tmo(p);
 		break;
 	};

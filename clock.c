@@ -32,6 +32,7 @@
 #include "clockcheck.h"
 #include "foreign.h"
 #include "filter.h"
+#include "fsm.h"
 #include "missing.h"
 #include "msg.h"
 #include "phc.h"
@@ -977,6 +978,7 @@ static int forwarding(struct clock *c, struct port *p)
 	case PS_SLAVE:
 	case PS_UNCALIBRATED:
 	case PS_PRE_MASTER:
+	case PS_PASSIVE_SLAVE:
 		return 1;
 	default:
 		break;
@@ -2308,6 +2310,10 @@ static void handle_state_decision_event(struct clock *c)
 			clock_update_slave(c);
 			event = EV_RS_SLAVE;
 			break;
+		case PS_PASSIVE_SLAVE:
+			/* clock_update_slave(c); */
+			event = EV_RS_PSLAVE;
+			break;
 		default:
 			event = EV_FAULT_DETECTED;
 			break;
@@ -2353,4 +2359,14 @@ struct servo *clock_servo(struct clock *c)
 enum servo_state clock_servo_state(struct clock *c)
 {
 	return c->servo_state;
+}
+
+bool clock_is_hsr(struct clock *c)
+{
+	return c->hsr_prp_mode == HSR_PRP_MODE_HSR;
+}
+
+bool clock_is_prp(struct clock *c)
+{
+	return c->hsr_prp_mode == HSR_PRP_MODE_PRP;
 }
