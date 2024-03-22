@@ -342,6 +342,7 @@ static void ts2phc_reconfigure(struct ts2phc_private *priv)
 		case PS_PRE_MASTER:
 		case PS_MASTER:
 		case PS_PASSIVE:
+		case PS_PASSIVE_SLAVE:
 			if (!c->is_target) {
 				pr_info("selecting %s for synchronization",
 					c->name);

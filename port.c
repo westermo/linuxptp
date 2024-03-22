@@ -2560,6 +2560,7 @@ void process_sync(struct port *p, struct ptp_message *m)
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
 	case PS_PASSIVE:
+	case PS_PASSIVE_SLAVE:
 		return;
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:

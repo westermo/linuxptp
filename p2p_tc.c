@@ -18,6 +18,7 @@
  */
 #include <errno.h>
 
+#include "ddt.h"
 #include "port.h"
 #include "port_private.h"
 #include "print.h"
@@ -35,12 +36,29 @@ static int p2p_delay_request(struct port *p)
 	case PS_PRE_MASTER:
 	case PS_MASTER:
 	case PS_PASSIVE:
+	case PS_PASSIVE_SLAVE:
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
 	case PS_GRAND_MASTER:
 		break;
 	}
 	return port_delay_request(p);
+}
+
+static bool hsr_ring_eliminate(struct port *p, struct ptp_message *msg)
+{
+	struct ClockIdentity c1, c2;
+
+	if (clock_is_hsr(p->clock)) {
+	    c1 = clock_identity(p->clock);
+	    c2 = msg->header.sourcePortIdentity.clockIdentity;
+
+	    if (cid_eq(&c1, &c2)) {
+		    return true;
+	    }
+	}
+
+	return false;
 }
 
 void p2p_dispatch(struct port *p, enum fsm_event event, int mdiff)
@@ -81,6 +99,7 @@ void p2p_dispatch(struct port *p, enum fsm_event event, int mdiff)
 	case PS_GRAND_MASTER:
 		break;
 	case PS_PASSIVE:
+	case PS_PASSIVE_SLAVE:
 		port_set_announce_tmo(p);
 		break;
 	case PS_UNCALIBRATED:
@@ -163,6 +182,12 @@ enum fsm_event p2p_event(struct port *p, int fd_index)
 		msg_put(msg);
 		return EV_NONE;
 	}
+
+	if (hsr_ring_eliminate(p, dup)) {
+		event = EV_NONE;
+		goto out;
+	}
+
 	if (tc_ignore(p, dup)) {
 		msg_put(dup);
 		dup = NULL;
@@ -248,6 +273,7 @@ enum fsm_event p2p_event(struct port *p, int fd_index)
 		break;
 	}
 
+out:
 	msg_put(msg);
 	if (dup) {
 		msg_put(dup);

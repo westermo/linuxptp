@@ -231,6 +231,12 @@ enum port_state ptp_fsm(enum port_state state, enum fsm_event event, int mdiff)
 		break;
 	case PS_PASSIVE_SLAVE:
 		switch (event) {
+		case EV_DESIGNATED_DISABLED:
+			next = PS_DISABLED;
+			break;
+		case EV_FAULT_DETECTED:
+			next = PS_FAULTY;
+			break;
 		case EV_RS_MASTER:
 			next = PS_PRE_MASTER;
 			break;
