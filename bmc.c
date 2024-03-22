@@ -19,7 +19,9 @@
 #include <string.h>
 
 #include "bmc.h"
+#include "clock.h"
 #include "ds.h"
+#include "port.h"
 #include "print.h"
 
 static int portid_cmp(struct PortIdentity *a, struct PortIdentity *b)
@@ -138,16 +140,60 @@ static enum port_state hsr_state_decision(struct clock *c, struct port *r,
 	port_best = port_best_foreign(r);
 	pair_best = port_best_foreign(q);
 
+
+	/* TC */
+	if (clock_type(c) == CLOCK_TYPE_E2E || clock_type(c) == CLOCK_TYPE_P2P) {
+		pr_err("CASAN: TC port %s", port_log_name(r));
+		/* IEC62439-3: A.5.4. b) and c). SLAVE */
+		if (compare(port_best, clock_best) == 0 || compare(pair_best, clock_best) == 0) {
+			if (compare(port_best, pair_best) > 0) {
+				pr_err("CASAN %s: PS_SLAVE", port_log_name(r));
+				return PS_SLAVE;
+			} else {
+				pr_err("CASAN %s: PS_PASSIVE_SLAVE", port_log_name(r));
+				return PS_PASSIVE_SLAVE;
+			}
+		}
+
+		int res1 = compare(clock_best, port_best);
+		int res2 = compare(clock_best, pair_best);
+
+		/* The primary Master should have res1 and res2 as
+		* A_BETTER. Redundant Master should have one or both as
+		* A_BETTER_TOPO, in case of one link being broken that
+		* one will be A_BETTER.
+		*/
+		pr_err("CASAN: res1 %d. res2 %d", res1, res2);
+		if (res1 > 0 && res2 > 0) {
+			/* /\* IEC62439-3: A.5.4. a) Active MASTER *\/ */
+			/* if (res1 == A_BETTER && res2 == A_BETTER) { */
+			pr_err("CASAN %s: PS_MASTER 2", port_log_name(r));
+			return PS_MASTER;
+			/* } */
+			/* IEC62439-3: A.5.4. d) Redundant MASTER */
+			/* pr_err("CASAN %s: PS_PASSIVE 1", port_log_name(r)); */
+			/* return PS_PASSIVE; */
+		}
+
+		/* pr_err("HSR BMC state decision failed %s", port_log_name(r)); */
+		pr_err("HSR BMC state decision fallback to FAULTY %s", port_log_name(r));
+		return PS_FAULTY;
+	}
+
+
 	/* IEC62439-3: A.5.4. b) and c). SLAVE */
 	if (compare(port_best, clock_best) == 0 || compare(pair_best, clock_best) == 0) {
 		if (compare(port_best, pair_best) > 0) {
+			pr_err("CASAN %s: PS_SLAVE", port_log_name(r));
 			return PS_SLAVE;
 		} else {
+			pr_err("CASAN %s: PS_PASSIVE_SLAVE", port_log_name(r));
 			return PS_PASSIVE_SLAVE;
 		}
 	}
 
 	if (!port_best && !pair_best) {
+		pr_err("CASAN %s: PS_MASTER 1", port_log_name(r));
 		return PS_MASTER;
 	}
 
@@ -162,13 +208,16 @@ static enum port_state hsr_state_decision(struct clock *c, struct port *r,
 	if (res1 > 0 && res2 > 0) {
 		/* /\* IEC62439-3: A.5.4. a) Active MASTER *\/ */
 		if (res1 == A_BETTER && res2 == A_BETTER) {
+			pr_err("CASAN %s: PS_MASTER 2", port_log_name(r));
 			return PS_MASTER;
 		}
 		/* IEC62439-3: A.5.4. d) Redundant MASTER */
+		pr_err("CASAN %s: PS_PASSIVE 1", port_log_name(r));
 		return PS_PASSIVE;
 	}
 	/* IEC62439-3: A.5.4. d) Redundant MASTER */
 	if (compare(port_best, pair_best) != 0) {
+		pr_err("CASAN %s: PS_PASSIVE 2", port_log_name(r));
 		return PS_PASSIVE;
 	}
 

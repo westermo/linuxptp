@@ -19,11 +19,15 @@
 #include <stdlib.h>
 
 #include "clock.h"
+#include "ddt.h"
+#include "ds.h"
 #include "fsm.h"
+#include "msg.h"
 #include "port.h"
 #include "print.h"
 #include "tc.h"
 #include "tmv.h"
+#include "util.h"
 
 enum tc_match {
 	TC_MISMATCH,
@@ -31,6 +35,108 @@ enum tc_match {
 	TC_FUP_SYNC,
 	TC_DELAY_REQRESP,
 };
+
+static void tc_hsr_set_port_identity(struct port *q, struct port *p,
+				     struct ptp_message *msg, struct PortIdentity *tmp,
+				     bool set)
+{
+	struct port *master = p;
+
+	/* Use identity of port A */
+	if (port_hsr_prp_b(p))
+		master = port_get_paired(p);
+
+	/* Ring injection requires setting the sourcePortIdentity to the TC clock and port */
+	if (set && !port_get_paired(q) && port_get_paired(master)) {
+		*tmp = msg->header.sourcePortIdentity;
+		msg->header.sourcePortIdentity.clockIdentity = master->portIdentity.clockIdentity;
+		msg->header.sourcePortIdentity.portNumber = htons(master->portIdentity.portNumber);
+	} else if (!set && !port_get_paired(q) && port_get_paired(master)) {
+		msg->header.sourcePortIdentity = *tmp;
+	}
+}
+
+static void tc_prp_set_port_number_bits(struct port *from, struct port *to, struct ptp_message *msg, bool set)
+{
+	// From interlink to A/B, clear portNumber bits
+	if (port_hsr_prp_a(to) || port_hsr_prp_b(to) || !set) {
+		msg->header.sourcePortIdentity.portNumber &= ~htons(0b11 << 12);
+		return;
+	}
+
+	// From A/B to interlink
+	if (port_hsr_prp_a(from)) {
+		// Set portNumber 10
+		msg->header.sourcePortIdentity.portNumber |= htons(0b10 << 12);
+	} else if (port_hsr_prp_b(from)) {
+		// Set portNumber 11
+		msg->header.sourcePortIdentity.portNumber |= htons(0b11 << 12);
+	}
+}
+
+static bool tc_prp_should_fwd(struct port *q, struct port *p)
+{
+	if (port_hsr_prp_a(q) && port_hsr_prp_b(p))
+		return false;
+	if (port_hsr_prp_a(p) && port_hsr_prp_b(q))
+		return false;
+	return true;
+}
+static bool tc_hsr_should_fwd(struct port *q, struct port *p,
+					struct ptp_message *msg)
+{
+	struct PortIdentity parent = clock_parent_identity(q->clock);
+	struct PortIdentity tmp;
+	struct port *pair;
+
+	/* Let HW forwarding happen for ring ports */
+	if (port_get_paired(q) && port_get_paired(p)) {
+		return false;
+	}
+
+	// Into ring
+	if (!port_get_paired(q) && port_get_paired(p)) {
+		/* Send on port A and have it duplicated in HW */
+		if (port_hsr_prp_a(p)) {
+			return true;
+		} else if (port_hsr_prp_b(p)) {
+			/* If port A is down we send on port B */
+			pair = port_get_paired(p);
+			if (pair->state == PS_FAULTY || pair->state == PS_DISABLED) {
+				return true;
+			}
+			return false;
+		}
+	}
+
+	// Out from ring
+	if (port_get_paired(q) && !port_get_paired(p)) {
+		if (q->state == PS_MASTER) {
+			/* GM-attached. Don't forward to other GM.
+			 * According to standard, this case should be
+			 * handled by HSR not forwarding due to
+			 * pathId. But since that probably isn't possible
+			 * we need to prevent it here to the best of our
+			 * ability. We will still forward there until
+			 * we have reached the Master state.
+			 */
+			return false;
+		} else {
+			// Slave-attached
+			if (q->state == PS_PASSIVE_SLAVE) {
+				return false;
+			}
+			// XXX: check_source_identity ??
+			tmp = parent;
+			tmp.portNumber = htons(tmp.portNumber);
+			if(!pid_eq(&tmp, &msg->header.sourcePortIdentity)) {
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
 
 static TAILQ_HEAD(tc_pool, tc_txd) tc_pool = TAILQ_HEAD_INITIALIZER(tc_pool);
 
@@ -51,6 +157,22 @@ static struct tc_txd *tc_allocate(void)
 	}
 	txd = calloc(1, sizeof(*txd));
 	return txd;
+}
+
+int tc_hsr_prp_blocked(struct port *p, enum port_state s)
+{
+	/* Forwarding to PASSIVE and PASSIVE_SLAVE is acceptable for HSR/PRP */
+	// XXX: Is this correct?
+	switch (s) {
+	case PS_INITIALIZING:
+	case PS_FAULTY:
+	case PS_DISABLED:
+	case PS_LISTENING:
+	case PS_PRE_MASTER:
+		return 1;
+	default:
+		return 0;
+	}
 }
 
 int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
@@ -76,12 +198,11 @@ int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 
 	/* Ingress state */
 	s = port_state(q);
-	if (clock_is_hsr(q->clock)) {
-		if (s != PS_INITIALIZING && s != PS_FAULTY) {
-			goto egress;
-		} else {
+	if (clock_is_hsr(q->clock) || clock_is_prp(q->clock)) {
+		if (tc_hsr_prp_blocked(q, s)) {
 			return 1;
 		}
+		goto egress;
 	}
 	switch (s) {
 	case PS_INITIALIZING:
@@ -111,12 +232,11 @@ int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 egress:
 	/* Egress state */
 	s = port_state(p);
-	if (clock_is_hsr(p->clock)) {
-		if (s != PS_INITIALIZING && s != PS_FAULTY) {
-			goto out;
-		} else {
+	if (clock_is_hsr(p->clock) || clock_is_prp(p->clock)) {
+		if (tc_hsr_prp_blocked(p, s)) {
 			return 1;
 		}
+		goto out;
 	}
 	switch (s) {
 	case PS_INITIALIZING:
@@ -258,6 +378,7 @@ static void tc_complete_syfup(struct port *q, struct port *p,
 	c2 += tmv_to_TimeInterval(q->peer_delay);
 	c2 += q->asymmetry;
 	fup->header.correction = host2net64(c2);
+
 	cnt = transport_send(p->trp, &p->fda, TRANS_GENERAL, fup);
 	if (cnt <= 0) {
 		pr_err("tc failed to forward follow up on %s", p->log_name);
@@ -265,6 +386,8 @@ static void tc_complete_syfup(struct port *q, struct port *p,
 	}
 	/* Restore original correction value for next egress port. */
 	fup->header.correction = host2net64(c1);
+
+
 	TAILQ_REMOVE(&p->tc_transmitted, txd, list);
 	msg_put(txd->msg);
 	tc_recycle(txd);
@@ -300,6 +423,7 @@ static int tc_current(struct ptp_message *m, struct timespec now)
 static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 {
 	tmv_t egress, ingress = msg->hwts.ts, residence;
+	struct PortIdentity tmp;
 	struct port *p;
 	int cnt, err;
 	double rr;
@@ -322,11 +446,20 @@ static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 		if (tc_blocked(q, p, msg)) {
 			continue;
 		}
-
 		if ((q->timestamping >= TS_ONESTEP) && (msg_type(msg) == SYNC)) {
 			corr = net2host64(msg->header.correction);
 			corr += p->tx_timestamp_offset;
 			msg->header.correction = host2net64(corr);
+		}
+		if (clock_is_hsr(q->clock)) {
+			if (!tc_hsr_should_fwd(q, p, msg))
+				continue;
+			tc_hsr_set_port_identity(q, p, msg, &tmp, true);
+		}
+		if (clock_is_prp(q->clock)) {
+			if (!tc_prp_should_fwd(q, p))
+				continue;
+			tc_prp_set_port_number_bits(q, p, msg, true);
 		}
 
 		cnt = transport_send(p->trp, &p->fda, TRANS_DEFER_EVENT, msg);
@@ -337,6 +470,13 @@ static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 		}
 
 		msg->header.correction = orig_corr;
+
+		if (clock_is_hsr(q->clock)) {
+			tc_hsr_set_port_identity(q, p, msg, &tmp, false);
+		}
+		if (clock_is_prp(q->clock)) {
+			tc_prp_set_port_number_bits(q, p, msg, false);
+		}
 	}
 
 	if (q->timestamping >= TS_ONESTEP) {
@@ -494,6 +634,7 @@ int tc_manage(struct port *q, struct ptp_message *msg)
 
 int tc_forward(struct port *q, struct ptp_message *msg)
 {
+	struct PortIdentity tmp;
 	uint16_t steps_removed;
 	struct port *p;
 	int cnt;
@@ -501,17 +642,39 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 	if (q->tc_spanning_tree && msg_type(msg) == ANNOUNCE) {
 		steps_removed = ntohs(msg->announce.stepsRemoved);
 		msg->announce.stepsRemoved = htons(1 + steps_removed);
+	} else if (clock_is_hsr(q->clock) && msg_type(msg) == MANAGEMENT) {
+		/* HSR forwards in HW inside the ring, causing a huge
+		 * amount of packages since all requests and responses
+		 * are basically broadcast. Let's not forward them for
+		 * now.
+		 */
+		return 0;
 	}
 
 	for (p = clock_first_port(q->clock); p; p = LIST_NEXT(p, list)) {
 		if (tc_blocked(q, p, msg)) {
 			continue;
 		}
+		/* Management packets need to retain their identity,
+		 * else everything behind it will appear as the same
+		 * clock. This is not mentioned in the HSR/PRP standard.
+		 */
+		if (clock_is_hsr(q->clock)) {
+			if (!tc_hsr_should_fwd(q, p, msg)) {
+				continue;
+			}
+			if (msg_type(msg) != MANAGEMENT) {
+			    tc_hsr_set_port_identity(q, p, msg, &tmp, true);
+			}
+		}
 		cnt = transport_send(p->trp, &p->fda, TRANS_GENERAL, msg);
 		if (cnt <= 0) {
 			pr_err("tc failed to forward message on %s",
 			       p->log_name);
 			port_dispatch(p, EV_FAULT_DETECTED, 0);
+		}
+		if (clock_is_hsr(q->clock) && msg_type(msg) != MANAGEMENT) {
+			tc_hsr_set_port_identity(q, p, msg, &tmp, false);
 		}
 	}
 	return 0;
