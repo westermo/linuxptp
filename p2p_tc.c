@@ -18,6 +18,7 @@
  */
 #include <errno.h>
 
+#include "clock.h"
 #include "ddt.h"
 #include "port.h"
 #include "port_private.h"
@@ -107,6 +108,15 @@ void p2p_dispatch(struct port *p, enum fsm_event event, int mdiff)
 		port_set_announce_tmo(p);
 		break;
 	};
+
+	if (clock_tc_syntonize(p->clock) && p->jbod && p->state == PS_UNCALIBRATED && p->phc_index >= 0 ) {
+		if (clock_switch_phc(p->clock, p->phc_index)) {
+			p->last_fault_type = FT_SWITCH_PHC;
+			port_dispatch(p, EV_FAULT_DETECTED, 0);
+			return;
+		}
+		clock_sync_interval(p->clock, p->log_sync_interval);
+	}
 }
 
 enum fsm_event p2p_event(struct port *p, int fd_index)

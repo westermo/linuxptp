@@ -351,6 +351,10 @@ static void ts2phc_reconfigure(struct ts2phc_private *priv)
 			num_target_clocks++;
 			break;
 		case PS_UNCALIBRATED:
+			/* TC will never reach SLAVE state */
+			if (priv->clock_type == CLOCK_TYPE_E2E || priv->clock_type == CLOCK_TYPE_P2P) {
+				ref_clk = c;
+			}
 			num_ref_clocks++;
 			break;
 		case PS_SLAVE:
@@ -367,7 +371,10 @@ static void ts2phc_reconfigure(struct ts2phc_private *priv)
 		priv->ref_clock->is_target = false;
 		/* Reset to original state in next reconfiguration. */
 		priv->ref_clock->new_state = priv->ref_clock->state;
-		priv->ref_clock->state = PS_SLAVE;
+		if (priv->clock_type == CLOCK_TYPE_E2E || priv->clock_type == CLOCK_TYPE_P2P)
+			priv->ref_clock->state = PS_UNCALIBRATED;
+		else
+			priv->ref_clock->state = PS_SLAVE;
 		pr_info("no reference clock, selecting %s by default",
 			last->name);
 		return;
@@ -672,6 +679,8 @@ int main(int argc, char *argv[])
 	print_set_verbose(config_get_int(cfg, NULL, "verbose"));
 	print_set_syslog(config_get_int(cfg, NULL, "use_syslog"));
 	print_set_level(config_get_int(cfg, NULL, "logging_level"));
+
+	priv.clock_type = config_get_int(cfg, NULL, "clock_type");
 
 	STAILQ_INIT(&priv.sinks);
 
