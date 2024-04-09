@@ -436,6 +436,8 @@ void clock_check_ts(struct clock *c, uint64_t ts);
  */
 double clock_rate_ratio(struct clock *c);
 
+bool clock_tc_syntonize(struct clock *c);
+
 bool clock_is_hsr(struct clock *c);
 bool clock_is_prp(struct clock *c);
 
