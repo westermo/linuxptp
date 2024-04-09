@@ -12,6 +12,7 @@
 #include <time.h>
 #include <gpiod.h>
 
+#include "clock.h"
 #include "pmc_agent.h"
 #include "servo.h"
 #include "ts2phc_pps_source.h"
@@ -61,6 +62,7 @@ struct ts2phc_private {
 	int use_gpio;
 	int gpio_polarity;
 	int last_edge_rising;
+	enum clock_type clock_type;
 	LIST_HEAD(port_head, ts2phc_port) ports;
 	LIST_HEAD(clock_head, ts2phc_clock) clocks;
 };

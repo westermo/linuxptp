@@ -1995,6 +1995,7 @@ int clock_switch_phc(struct clock *c, int phc_index)
 		return -1;
 	}
 	fadj = clockadj_get_freq(clkid);
+	c->freq = fadj;
 	servo = servo_create(c->config, c->servo_type, -fadj, max_adj, 0);
 	if (!servo) {
 		pr_err("Switching PHC, failed to create clock servo");
@@ -2354,3 +2355,9 @@ enum servo_state clock_servo_state(struct clock *c)
 {
 	return c->servo_state;
 }
+
+bool clock_tc_syntonize(struct clock *c)
+{
+	return c->tc_syntonize;
+}
+
