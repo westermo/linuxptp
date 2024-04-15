@@ -74,12 +74,55 @@ static void tc_prp_set_port_number_bits(struct port *from, struct port *to, stru
 	}
 }
 
+static bool tc_hsr_prp_should_use_port(struct port *p)
+{
+	struct port *pair;
+
+	/* Send on port A and have it duplicated in HW */
+	if (port_hsr_prp_a(p)) {
+		return true;
+	} else if (port_hsr_prp_b(p)) {
+		/* If port A is down we send on port B. Also do if A
+		 * is PASSIVE_SLAVE since that allows us to preserve
+		 * tc_ignore rules for upstream DelayReq in PRP (only
+		 * DelayReq will egress on a PASSIVE_SLAVE port). It
+		 * will be duplicated in HW, we just send on the B
+		 * port.
+		 */
+		pair = port_get_paired(p);
+		switch(pair->state) {
+		case PS_DISABLED:
+		case PS_FAULTY:
+		case PS_PASSIVE_SLAVE:
+			return true;
+		default:
+			break;
+		}
+		return false;
+	}
+	return true;
+}
+
 static bool tc_prp_should_fwd(struct port *q, struct port *p)
 {
 	if (port_hsr_prp_a(q) && port_hsr_prp_b(p))
 		return false;
 	if (port_hsr_prp_a(p) && port_hsr_prp_b(q))
 		return false;
+
+	/* Into PRP nets */
+	if (!port_get_paired(q) && port_get_paired(p)) {
+		return tc_hsr_prp_should_use_port(p);
+	}
+
+	/* Out from PRP nets */
+	// casan: I don't think PRP has any restrictions on
+	// forwarding. It will all be based on port state, SLAVE vs
+	// PASSIVE_SLAVE.
+	/* if (port_get_paired(q) && !port_get_paired(p)) { */
+
+	/* } */
+
 	return true;
 }
 static bool tc_hsr_should_fwd(struct port *q, struct port *p,
@@ -87,52 +130,45 @@ static bool tc_hsr_should_fwd(struct port *q, struct port *p,
 {
 	struct PortIdentity parent = clock_parent_identity(q->clock);
 	struct PortIdentity tmp;
-	struct port *pair;
 
-	/* Let HW forwarding happen for ring ports */
-	if (port_get_paired(q) && port_get_paired(p)) {
-		return false;
-	}
+	/* Forwarding within the ring happens in HW and is prevented
+	 * in SW through the normal port states. */
 
-	// Into ring
+	/* Into ring */
 	if (!port_get_paired(q) && port_get_paired(p)) {
-		/* Send on port A and have it duplicated in HW */
-		if (port_hsr_prp_a(p)) {
-			return true;
-		} else if (port_hsr_prp_b(p)) {
-			/* If port A is down we send on port B */
-			pair = port_get_paired(p);
-			if (pair->state == PS_FAULTY || pair->state == PS_DISABLED) {
-				return true;
-			}
-			return false;
-		}
+		return tc_hsr_prp_should_use_port(p);
 	}
 
-	// Out from ring
+	/* Out from ring */
 	if (port_get_paired(q) && !port_get_paired(p)) {
-		if (q->state == PS_MASTER) {
-			/* GM-attached. Don't forward to other GM.
-			 * According to standard, this case should be
-			 * handled by HSR not forwarding due to
-			 * pathId. But since that probably isn't possible
-			 * we need to prevent it here to the best of our
-			 * ability. We will still forward there until
-			 * we have reached the Master state.
-			 */
+		tmp = parent;
+		tmp.portNumber = htons(tmp.portNumber);
+		if(!pid_eq(&tmp, &msg->header.sourcePortIdentity)) {
 			return false;
-		} else {
-			// Slave-attached
-			if (q->state == PS_PASSIVE_SLAVE) {
-				return false;
-			}
-			// XXX: check_source_identity ??
-			tmp = parent;
-			tmp.portNumber = htons(tmp.portNumber);
-			if(!pid_eq(&tmp, &msg->header.sourcePortIdentity)) {
-				return false;
-			}
 		}
+		// TODO: Handle Delay_Req? Is HSR used with E2E?
+		//if (q->state == PS_MASTER) {
+		//	/* GM-attached. Don't forward to other GM.
+		//	 * According to standard, this case should be
+		//	 * handled by HSR not forwarding due to
+		//	 * pathId. But since that probably isn't possible
+		//	 * we need to prevent it here to the best of our
+		//	 * ability. We will still forward there until
+		//	 * we have reached the Master state.
+		//	 */
+		//	return false;
+		//} else {
+		//	// Slave-attached
+		//	if (q->state == PS_PASSIVE_SLAVE) {
+		//		return false;
+		//	}
+		//	// XXX: check_source_identity ??
+		//	tmp = parent;
+		//	tmp.portNumber = htons(tmp.portNumber);
+		//	if(!pid_eq(&tmp, &msg->header.sourcePortIdentity)) {
+		//		return false;
+		//	}
+		//}
 	}
 
 	return true;
@@ -198,12 +234,6 @@ int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 
 	/* Ingress state */
 	s = port_state(q);
-	if (clock_is_hsr(q->clock) || clock_is_prp(q->clock)) {
-		if (tc_hsr_prp_blocked(q, s)) {
-			return 1;
-		}
-		goto egress;
-	}
 	switch (s) {
 	case PS_INITIALIZING:
 	case PS_FAULTY:
@@ -232,12 +262,6 @@ int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 egress:
 	/* Egress state */
 	s = port_state(p);
-	if (clock_is_hsr(p->clock) || clock_is_prp(p->clock)) {
-		if (tc_hsr_prp_blocked(p, s)) {
-			return 1;
-		}
-		goto out;
-	}
 	switch (s) {
 	case PS_INITIALIZING:
 	case PS_FAULTY:
@@ -268,7 +292,6 @@ egress:
 		break;
 	}
 
-out:
 	return 0;
 }
 
@@ -642,7 +665,7 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 	if (q->tc_spanning_tree && msg_type(msg) == ANNOUNCE) {
 		steps_removed = ntohs(msg->announce.stepsRemoved);
 		msg->announce.stepsRemoved = htons(1 + steps_removed);
-	} else if (clock_is_hsr(q->clock) && msg_type(msg) == MANAGEMENT) {
+	} else if ((clock_is_hsr(q->clock) || clock_is_prp(q->clock)) && msg_type(msg) == MANAGEMENT) {
 		/* HSR forwards in HW inside the ring, causing a huge
 		 * amount of packages since all requests and responses
 		 * are basically broadcast. Let's not forward them for
@@ -667,14 +690,22 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 			    tc_hsr_set_port_identity(q, p, msg, &tmp, true);
 			}
 		}
+		if (clock_is_prp(q->clock)) {
+			if (!tc_prp_should_fwd(q, p))
+				continue;
+			tc_prp_set_port_number_bits(q, p, msg, true);
+		}
 		cnt = transport_send(p->trp, &p->fda, TRANS_GENERAL, msg);
 		if (cnt <= 0) {
 			pr_err("tc failed to forward message on %s",
 			       p->log_name);
 			port_dispatch(p, EV_FAULT_DETECTED, 0);
 		}
-		if (clock_is_hsr(q->clock) && msg_type(msg) != MANAGEMENT) {
+		if (clock_is_hsr(q->clock)) {
 			tc_hsr_set_port_identity(q, p, msg, &tmp, false);
+		}
+		if (clock_is_prp(q->clock)) {
+			tc_prp_set_port_number_bits(q, p, msg, false);
 		}
 	}
 	return 0;
