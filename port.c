@@ -2239,6 +2239,7 @@ void process_follow_up(struct port *p, struct ptp_message *m)
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
 	case PS_PASSIVE:
+	case PS_PASSIVE_SLAVE:
 		return;
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
@@ -2694,6 +2695,7 @@ static void port_e2e_transition(struct port *p, enum port_state next)
 		port_set_sync_tx_tmo(p);
 		break;
 	case PS_PASSIVE:
+	case PS_PASSIVE_SLAVE:
 		port_set_announce_tmo(p);
 		break;
 	case PS_UNCALIBRATED:
