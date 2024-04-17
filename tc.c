@@ -74,6 +74,24 @@ static void tc_prp_set_port_number_bits(struct port *from, struct port *to, stru
 	}
 }
 
+static void tc_prp_clear_resp_port_number_bits(struct ptp_message *msg)
+{
+	// From interlink to A/B, clear portNumber bits
+	if (msg_type(msg) == DELAY_RESP)
+		msg->delay_resp.requestingPortIdentity.portNumber &= ~htons(0b11 << 12);
+}
+
+bool tc_prp_resp_is_lan(struct ptp_message *msg, UInteger16 lan_bits)
+{
+	UInteger16 portno; 
+
+	if (msg_type(msg) != DELAY_RESP)
+		return false;
+
+	portno = msg->delay_resp.requestingPortIdentity.portNumber;
+	return (ntohs(portno) & PRP_LAN_BITMASK) == lan_bits;
+}
+
 static bool tc_hsr_prp_should_use_port(struct port *p)
 {
 	struct port *pair;
@@ -103,25 +121,25 @@ static bool tc_hsr_prp_should_use_port(struct port *p)
 	return true;
 }
 
-static bool tc_prp_should_fwd(struct port *q, struct port *p)
+static bool tc_prp_should_fwd(struct port *q, struct port *p, struct ptp_message *msg)
 {
-	if (port_hsr_prp_a(q) && port_hsr_prp_b(p))
-		return false;
-	if (port_hsr_prp_a(p) && port_hsr_prp_b(q))
-		return false;
-
 	/* Into PRP nets */
 	if (!port_get_paired(q) && port_get_paired(p)) {
+		if (msg_type(msg) == DELAY_RESP) {
+			/* E2E mode: DelayResp must forward
+			 * independently, like Pdelay. Requires
+			 * duplication algorithm in kernel/HW to be aware
+			 * of this */
+			if (port_hsr_prp_a(p) && tc_prp_resp_is_lan(msg, PRP_LAN_A_BITS)) {
+				return true;
+			} else if (port_hsr_prp_b(p) && tc_prp_resp_is_lan(msg, PRP_LAN_B_BITS)) {
+				return true;
+			} else {
+				return false;
+			}
+		}
 		return tc_hsr_prp_should_use_port(p);
 	}
-
-	/* Out from PRP nets */
-	// casan: I don't think PRP has any restrictions on
-	// forwarding. It will all be based on port state, SLAVE vs
-	// PASSIVE_SLAVE.
-	/* if (port_get_paired(q) && !port_get_paired(p)) { */
-
-	/* } */
 
 	return true;
 }
@@ -410,7 +428,6 @@ static void tc_complete_syfup(struct port *q, struct port *p,
 	/* Restore original correction value for next egress port. */
 	fup->header.correction = host2net64(c1);
 
-
 	TAILQ_REMOVE(&p->tc_transmitted, txd, list);
 	msg_put(txd->msg);
 	tc_recycle(txd);
@@ -480,7 +497,7 @@ static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 			tc_hsr_set_port_identity(q, p, msg, &tmp, true);
 		}
 		if (clock_is_prp(q->clock)) {
-			if (!tc_prp_should_fwd(q, p))
+			if (!tc_prp_should_fwd(q, p, msg))
 				continue;
 			tc_prp_set_port_number_bits(q, p, msg, true);
 		}
@@ -691,7 +708,7 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 			}
 		}
 		if (clock_is_prp(q->clock)) {
-			if (!tc_prp_should_fwd(q, p))
+			if (!tc_prp_should_fwd(q, p, msg))
 				continue;
 			tc_prp_set_port_number_bits(q, p, msg, true);
 		}
@@ -742,6 +759,12 @@ int tc_fwd_response(struct port *q, struct ptp_message *msg)
 			continue;
 		}
 		if (p->timestamping == TS_ONESTEP) {
+			if (clock_is_prp(q->clock)) {
+				if (!tc_prp_should_fwd(q, p, msg))
+					continue;
+				tc_prp_set_port_number_bits(q, p, msg, true);
+				tc_prp_clear_resp_port_number_bits(msg);
+			}
 			if ((transport_send(p->trp, &p->fda, TRANS_GENERAL, msg)) <= 0) {
 				pr_err("tc failed to forward response on port %d", portnum(p));
 				port_dispatch(p, EV_FAULT_DETECTED, 0);
