@@ -72,6 +72,10 @@
 #define SIGNAL_NO_CHANGE   -128
 #define SIGNAL_SET_INITIAL 126
 
+#define PRP_LAN_A_BITS (0b10 << 12)
+#define PRP_LAN_B_BITS (0b11 << 12)
+#define PRP_LAN_BITMASK (0b11 << 12)
+
 enum timestamp_type {
 	TS_SOFTWARE,
 	TS_HARDWARE,
