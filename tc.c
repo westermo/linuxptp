@@ -283,29 +283,40 @@ static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 	struct port *p;
 	int cnt, err;
 	double rr;
-	Integer64 corr;
+	Integer64 corr, orig_corr;
 
 	clock_gettime(CLOCK_MONOTONIC, &msg->ts.host);
+
+	// Should this happen for DELAY_REQ/RESP too? At least the asymmetry and offset
+	if ((q->timestamping >= TS_ONESTEP) && (msg_type(msg) == SYNC)) {
+		corr = net2host64(msg->header.correction);
+		corr += tmv_to_TimeInterval(q->peer_delay);
+		corr += q->asymmetry;
+		corr += q->rx_timestamp_offset;
+		msg->header.correction = host2net64(corr);
+	}
+	orig_corr = msg->header.correction;
 
 	/* First send the event message out. */
 	for (p = clock_first_port(q->clock); p; p = LIST_NEXT(p, list)) {
 		if (tc_blocked(q, p, msg)) {
 			continue;
 		}
-		// Should this happen for DELAY_REQ/RESP too? At least the asymmetry and offset
+
 		if ((q->timestamping >= TS_ONESTEP) && (msg_type(msg) == SYNC)) {
-			corr = tmv_to_TimeInterval(q->peer_delay);
-			corr += q->asymmetry;
-			corr += q->rx_timestamp_offset;
+			corr = net2host64(msg->header.correction);
 			corr += p->tx_timestamp_offset;
-			msg->header.correction += host2net64(corr);
+			msg->header.correction = host2net64(corr);
 		}
+
 		cnt = transport_send(p->trp, &p->fda, TRANS_DEFER_EVENT, msg);
 		if (cnt <= 0) {
 			pr_err("failed to forward event from %s to %s",
 				q->log_name, p->log_name);
 			port_dispatch(p, EV_FAULT_DETECTED, 0);
 		}
+
+		msg->header.correction = orig_corr;
 	}
 
 	if (q->timestamping >= TS_ONESTEP) {
