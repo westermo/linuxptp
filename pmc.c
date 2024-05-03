@@ -479,7 +479,7 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 		break;
 	case MID_PORT_DATA_SET:
 		p = (struct portDS *) mgt->data;
-		if (p->portState > PS_SLAVE) {
+		if (p->portState > PS_SLAVE && p->portState != PS_PASSIVE_SLAVE) {
 			p->portState = 0;
 		}
 		fprintf(fp, "PORT_DATA_SET "
@@ -510,7 +510,7 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 		break;
 	case MID_PORT_PROPERTIES_NP:
 		ppn = (struct port_properties_np *) mgt->data;
-		if (ppn->port_state > PS_SLAVE) {
+		if (ppn->port_state > PS_SLAVE && ppn->port_state != PS_PASSIVE_SLAVE) {
 			ppn->port_state = 0;
 		}
 		fprintf(fp, "PORT_PROPERTIES_NP "
