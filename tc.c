@@ -728,9 +728,54 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 	return 0;
 }
 
+static int tc_twostep_to_onestep_syfup(struct port *q, struct ptp_message *msg)
+{
+	UInteger16 seq_id;
+	UInteger64 corr;
+
+	seq_id = ntohs(msg->header.sequenceId);
+
+	if (q->onestep_info.seq_id != seq_id || !q->onestep_info.valid) {
+		/* Save information until we get the corresponding Sync/Fup */
+		q->onestep_info.originTimestamp = msg->sync.originTimestamp;
+		q->onestep_info.correction = msg->header.correction;
+		q->onestep_info.reserved2 = msg->header.reserved2;
+		q->onestep_info.msg_type = msg_type(msg);
+		q->onestep_info.seq_id = seq_id;
+		q->onestep_info.valid = true;
+		return 0;
+	}
+
+	/* Include correction from both Sync and Fup */
+	corr = net2host64(msg->header.correction);
+	corr += net2host64(q->onestep_info.correction);
+	msg->header.correction = host2net64(corr);
+
+	if (q->onestep_info.msg_type == SYNC && msg_type(msg) == FOLLOW_UP) {
+		// Got Sync first, send Fup as Sync
+		msg->header.reserved2 = q->onestep_info.reserved2;
+		msg->header.tsmt = SYNC | q->transportSpecific;
+		/* controlField is deprecated, but in case GM sends
+		* Fup with it set we should set it to 0 for the Sync.
+		*/
+		msg->header.control = 0;
+	} else if (q->onestep_info.msg_type == FOLLOW_UP && msg_type(msg) == SYNC) {
+		// Got Fup first, send Sync with Fup info
+		msg->sync.originTimestamp = q->onestep_info.originTimestamp;
+		msg->header.flagField[0] &= ~TWO_STEP;
+	}
+
+	q->onestep_info.valid = false;
+	return tc_fwd_event(q, msg);
+}
+
 int tc_fwd_folup(struct port *q, struct ptp_message *msg)
 {
 	struct port *p;
+
+	if (q->timestamping >= TS_ONESTEP) {
+		return tc_twostep_to_onestep_syfup(q, msg);
+	}
 
 	clock_gettime(CLOCK_MONOTONIC, &msg->ts.host);
 
@@ -781,8 +826,12 @@ int tc_fwd_sync(struct port *q, struct ptp_message *msg)
 	struct ptp_message *fup = NULL;
 	int err;
 
-	if (q->timestamping >= TS_ONESTEP)
-		goto onestep;
+	if (q->timestamping >= TS_ONESTEP) {
+		if (!one_step(msg))
+			return tc_twostep_to_onestep_syfup(q, msg);
+		else
+			goto onestep;
+	}
 
 	if (one_step(msg)) {
 		fup = msg_allocate();
