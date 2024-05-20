@@ -59,6 +59,18 @@ struct tc_txd {
 	int ingress_port;
 };
 
+/* 2-step to 1-step conversion, needs to wait for
+ * Fup to send the Sync as 1-step.
+ */
+struct onestep_conversion_info {
+	struct Timestamp originTimestamp;
+	Integer64 correction;
+	UInteger16 seq_id;
+	UInteger32 reserved2;
+	UInteger8 msg_type;
+	bool valid;
+};
+
 struct port {
 	LIST_ENTRY(port) list;
 	const char *name;
@@ -168,6 +180,7 @@ struct port {
         bool hsr_prp_port_a;
         bool hsr_prp_port_b;
 	struct port *paired_port;
+	struct onestep_conversion_info onestep_info;
 };
 
 #define portnum(p) (p->portIdentity.portNumber)
