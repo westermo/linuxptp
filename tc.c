@@ -106,12 +106,16 @@ static bool tc_hsr_prp_should_use_port(struct port *p)
 		 * DelayReq will egress on a PASSIVE_SLAVE port). It
 		 * will be duplicated in HW, we just send on the B
 		 * port.
+		 *
+		 * If A is LISTENING we still want to send on B to
+		 * reduce switchover delay.
 		 */
 		pair = port_get_paired(p);
 		switch(pair->state) {
 		case PS_DISABLED:
 		case PS_FAULTY:
 		case PS_PASSIVE_SLAVE:
+		case PS_LISTENING:
 			return true;
 		default:
 			break;
