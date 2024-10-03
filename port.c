@@ -24,6 +24,9 @@
 #include <unistd.h>
 #include <sys/queue.h>
 #include <net/if.h>
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
+#include <sys/ioctl.h>
 
 #include "bmc.h"
 #include "clock.h"
@@ -57,6 +60,7 @@ enum syfu_event {
 static int port_is_ieee8021as(struct port *p);
 static int port_is_uds(struct port *p);
 static void port_nrate_initialize(struct port *p);
+static void port_set_hw_path_delay(struct port *p);
 
 static int announce_compare(struct ptp_message *m1, struct ptp_message *m2)
 {
@@ -2482,6 +2486,8 @@ calc:
 
 	p->peerMeanPathDelay = tmv_to_TimeInterval(p->peer_delay);
 
+	port_set_hw_path_delay(p);
+
 	if (p->state == PS_UNCALIBRATED || p->state == PS_SLAVE) {
 		clock_peer_delay(p->clock, p->peer_delay, t1, t2,
 				 p->nrate.ratio);
@@ -3616,4 +3622,43 @@ void port_set_paired(struct port *p, struct port *q)
 struct port *port_get_paired(struct port *p)
 {
 	return p->paired_port;
+}
+
+static void port_set_hw_path_delay(struct port *p)
+{
+#ifdef HAS_ETHTOOL_MEAN_PATH_DELAY
+	struct {
+		struct ethtool_tunable fld;
+		__s64 mean_path_delay;
+	} cont;
+	struct ifreq ifr;
+	Integer64 value;
+	int err;
+
+	if (!clock_is_hsr(p->clock) || !port_get_paired(p))
+		return;
+
+	/* Include ingr/egr latency for HW forwarded packets.
+	 * Ideally they would be separate registers in HW, but right
+	 * now they are not. */
+	value = tmv_to_nanoseconds(p->peer_delay)
+		+ (p->rx_timestamp_offset >> 16)
+		+ (p->tx_timestamp_offset >> 16);
+
+	cont.fld.cmd = ETHTOOL_PHY_STUNABLE;
+	cont.fld.id = ETHTOOL_PHY_MEAN_PATH_DELAY;
+	cont.fld.type_id = ETHTOOL_TUNABLE_S64;
+	cont.fld.len = 8;
+	cont.mean_path_delay = value;
+
+	ifr.ifr_data = (char*) &cont.fld;
+	strncpy(ifr.ifr_name, p->name, ETH_ALEN);
+
+	/* Just use the event file descriptor */
+	err = ioctl(p->fda.fd[FD_EVENT], SIOCETHTOOL, &ifr);
+	if (err < 0) {
+		perror("Cannot Set PHY Mean Path Delay");
+	}
+#endif
+	return;
 }
