@@ -151,6 +151,7 @@ struct clock {
 	struct time_zone tz[MAX_TIME_ZONES];
 	int tc_syntonize;
 	double freq;
+	double max_freq;
 	enum hsr_prp_mode hsr_prp_mode;
 };
 
@@ -767,8 +768,9 @@ static enum servo_state clock_no_adjust(struct clock *c, tmv_t ingress,
 					tmv_t origin)
 {
 	struct freq_estimator *f = &c->fest;
-	double freq, fui, ratio;
+	double freq, fui, ratio, tmp;
 	enum servo_state state;
+	int err;
 
 	if (c->local_sync_uncertain == SYNC_UNCERTAIN_FALSE) {
 		state = SERVO_LOCKED;
@@ -805,18 +807,28 @@ static enum servo_state clock_no_adjust(struct clock *c, tmv_t ingress,
 		tmv_dbl(tmv_sub(ingress, f->ingress1));
 	freq = (1.0 - ratio) * 1e9;
 
+	/* When doing onestep TC we skip over compensating for the neighbour
+	 * clock frequency in `tc_fwd_event`. Instead actually syntonize the
+	 * clock in HW. If we fail to set the frequency we
+	 * don't want to save the result.
+	 */
+	if (c->tc_syntonize) {
+		// TODO: Use sample-servo with freq and c->freq? They are not timestamps so may need adjusted servo
+		tmp = c->freq - freq;
+		/* pr_info("casan: Prev freq %lf. New freq %lf", c->freq, tmp); */
+		if (tmp > c->max_freq)
+			tmp = c->max_freq;
+		else if (tmp < -c->max_freq)
+			tmp = -c->max_freq;
+		err = clockadj_set_freq(c->clkid, tmp);
+		if (!err) {
+			c->freq = tmp;
+		}
+	}
+
 	if (c->stats.max_count > 1) {
 		clock_stats_update(&c->stats, tmv_dbl(c->master_offset), freq);
 	} else {
-		/* When doing onestep TC we skip over compensating for the neighbour
-		 * clock frequency in `tc_fwd_event`. Instead actually syntonize the
-		 * clock in HW.
-		 */
-		if (c->tc_syntonize) {
-			c->freq = c->freq - freq;
-			clockadj_set_freq(c->clkid, c->freq);
-		}
-
 		pr_info("master offset %10" PRId64 " s%d freq %+7.0f "
 			"path delay %9" PRId64,
 			tmv_to_nanoseconds(c->master_offset), state, freq,
@@ -1356,6 +1368,7 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 	if (c->clkid != CLOCK_INVALID) {
 		fadj = clockadj_get_freq(c->clkid);
 		c->freq = fadj;
+		c->max_freq = max_adj;
 		/* Disable write phase mode if not implemented by driver */
 		if (c->write_phase_mode && !phc_has_writephase(c->clkid)) {
 			pr_err("clock does not support write phase mode");
@@ -1998,6 +2011,7 @@ int clock_switch_phc(struct clock *c, int phc_index)
 	}
 	fadj = clockadj_get_freq(clkid);
 	c->freq = fadj;
+	c->max_freq = phc_max_adj(clkid);
 	servo = servo_create(c->config, c->servo_type, -fadj, max_adj, 0);
 	if (!servo) {
 		pr_err("Switching PHC, failed to create clock servo");
