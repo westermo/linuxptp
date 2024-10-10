@@ -129,6 +129,41 @@ int dscmp(struct dataset *a, struct dataset *b)
 	return diff < 0 ? A_BETTER : B_BETTER;
 }
 
+static char *compare_to_str(int res)
+{
+	switch (res) {
+	case A_BETTER:
+		return "A_BETTER";
+	case B_BETTER:
+		return "B_BETTER";
+	case A_BETTER_TOPO:
+		return "A_BETTER_TOPO";
+	case B_BETTER_TOPO:
+		return "B_BETTER_TOPO";
+	default:
+		return "EQUAL";
+	}
+}
+
+/* static void print_compare(const char *a_str, const char *b_str, int res) */
+/* { */
+/* 	pr_err("A %s | B %s | Compare = %s\n", a_str, b_str, compare_to_str(res)); */
+/* } */
+
+/* static void print_ds(const char* str, const struct dataset *d) */
+/* { */
+/* 	pr_err("Dataset on %s\n", str); */
+/* 	if (!d) { */
+/* 		pr_err("Nothing to show yet\n"); */
+/* 		return; */
+/* 	} */
+/* 	pr_err("Identity: %s\n", cid2str(&d->identity)); */
+/* 	pr_err("Priority1: %d\n", d->priority1); */
+/* 	pr_err("StepsRemoved: %d\n", d->stepsRemoved); */
+/* 	pr_err("Sender: %s\n", pid2str(&d->sender)); */
+/* 	pr_err("Receiver: %s\n", pid2str(&d->receiver)); */
+/* } */
+
 static enum port_state hsr_state_decision(struct clock *c, struct port *r,
 					  int (*compare)(struct dataset *a, struct dataset *b))
 {
@@ -140,16 +175,41 @@ static enum port_state hsr_state_decision(struct clock *c, struct port *r,
 	port_best = port_best_foreign(r);
 	pair_best = port_best_foreign(q);
 
+	/* print_ds("Clock", clock_best); */
+	/* print_ds(port_log_name(r), port_best); */
+	/* print_ds(port_log_name(q), pair_best); */
+	/* print_compare(port_log_name(r), port_log_name(q), compare(port_best, clock_best)); */
+	/* print_compare("Clock", port_log_name(r), compare(clock_best, port_best)); */
+	/* print_compare("Clock", port_log_name(q), compare(clock_best, pair_best)); */
+
 	/* IEC62439-3: A.5.4. b) and c). SLAVE */
 	if (compare(port_best, clock_best) == 0 || compare(pair_best, clock_best) == 0) {
 		if (compare(port_best, pair_best) > 0) {
+			/* Sticky: stay passive if other port is active */
+			if (port_state(q) == PS_UNCALIBRATED) {
+				pr_debug("State %s: PS_PASSIVE_SLAVE 1\n", port_log_name(r));
+				return PS_PASSIVE_SLAVE;
+			}
+			pr_debug("State %s: PS_SLAVE 1\n", port_log_name(r));
 			return PS_SLAVE;
 		} else {
+			/* Sticky: stay active if other port is
+			 * passive. If we are comming directly from
+			 * MASTER it's an indication of
+			 * ANNOUNCE_RECEIPT_TIMEOUT on this port. Don't
+			 * behave like sticky in this case.
+			 */
+			if (port_state(q) == PS_PASSIVE_SLAVE && port_state(r) != PS_MASTER) {
+				pr_debug("State %s: PS_SLAVE 2\n", port_log_name(r));
+				return PS_SLAVE;
+			}
+			pr_debug("State %s: PS_PASSIVE_SLAVE 2\n", port_log_name(r));
 			return PS_PASSIVE_SLAVE;
 		}
 	}
 
 	if (!port_best && !pair_best) {
+		pr_debug("State %s: PS_MASTER 1\n", port_log_name(r));
 		return PS_MASTER;
 	}
 
@@ -160,20 +220,26 @@ static enum port_state hsr_state_decision(struct clock *c, struct port *r,
 	 * A_BETTER. Redundant Master should have one or both as
 	 * A_BETTER_TOPO, in case of one link being broken that
 	 * one will be A_BETTER.
+	 *
+	 * A_BETTER means better qualification.
+	 * A_BETTER_TOPO means better topology (fewer stepsRemoved)
 	 */
 	if (res1 > 0 && res2 > 0) {
 		/* /\* IEC62439-3: A.5.4. a) Active MASTER *\/ */
-		if (res1 == A_BETTER && res2 == A_BETTER) {
+		if (res1 >= A_BETTER && res2 >= A_BETTER) {
+			pr_debug("State %s: PS_MASTER 2\n", port_log_name(r));
 			return PS_MASTER;
 		}
 		/* IEC62439-3: A.5.4. d) Redundant MASTER */
 		if (clock_type(c) != CLOCK_TYPE_E2E && clock_type(c) != CLOCK_TYPE_P2P) {
+			pr_debug("State %s: PS_PASSIVE 1\n", port_log_name(r));
 			return PS_PASSIVE;
 		}
 	}
 	/* IEC62439-3: A.5.4. d) Redundant MASTER */
 	if (clock_type(c) != CLOCK_TYPE_E2E && clock_type(c) != CLOCK_TYPE_P2P) {
 		if (compare(port_best, pair_best) != 0) {
+			pr_debug("State %s: PS_PASSIVE 2\n", port_log_name(r));
 			return PS_PASSIVE;
 		}
 	}
