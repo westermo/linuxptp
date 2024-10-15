@@ -58,6 +58,9 @@ static void tc_hsr_set_port_identity(struct port *q, struct port *p,
 
 static void tc_prp_set_port_number_bits(struct port *from, struct port *to, struct ptp_message *msg, bool set)
 {
+	if (port_delay_mechanism(from) != DM_E2E)
+		return;
+
 	// From interlink to A/B, clear portNumber bits
 	if (port_hsr_prp_a(to) || port_hsr_prp_b(to) || !set) {
 		msg->header.sourcePortIdentity.portNumber &= ~htons(0b11 << 12);
@@ -74,8 +77,11 @@ static void tc_prp_set_port_number_bits(struct port *from, struct port *to, stru
 	}
 }
 
-static void tc_prp_clear_resp_port_number_bits(struct ptp_message *msg)
+static void tc_prp_clear_resp_port_number_bits(struct port *from, struct ptp_message *msg)
 {
+	if (port_delay_mechanism(from) != DM_E2E)
+		return;
+
 	// From interlink to A/B, clear portNumber bits
 	if (msg_type(msg) == DELAY_RESP)
 		msg->delay_resp.requestingPortIdentity.portNumber &= ~htons(0b11 << 12);
@@ -812,7 +818,7 @@ int tc_fwd_response(struct port *q, struct ptp_message *msg)
 				if (!tc_prp_should_fwd(q, p, msg))
 					continue;
 				tc_prp_set_port_number_bits(q, p, msg, true);
-				tc_prp_clear_resp_port_number_bits(msg);
+				tc_prp_clear_resp_port_number_bits(q, msg);
 			}
 			if ((transport_send(p->trp, &p->fda, TRANS_GENERAL, msg)) <= 0) {
 				pr_err("tc failed to forward response on port %d", portnum(p));
