@@ -1122,6 +1122,7 @@ static int red_port_prepare_and_send(struct red_port *rp, struct ptp_message *ms
 	cnt = red_port_send(rp, event, msg);
 	/* } */
 	if (cnt <= 0) {
+		rp->upper->errorCounter++;
 		return -1;
 	}
 	red_stats_inc_tx(rp->upper, msg);
@@ -2538,7 +2539,14 @@ struct port *red_open(const char *phc_device,
 		pr_err("timerfd_create failed: %m");
 		goto err_tsproc;
 	}
-	
+
+	p->egress_vlan_tagged = config_get_int(cfg, NULL, "egress_vlan.tagged");
+	if (p->egress_vlan_tagged) {
+		p->egress_vlan_id = config_get_int(cfg, NULL, "egress_vlan.id");
+		p->egress_vlan_prio = config_get_int(cfg, NULL, "egress_vlan.prio");
+	}
+	p->errorCounter = 0;
+
 	return p;
 
 err_tsproc:
@@ -2917,6 +2925,36 @@ static int red_port_management_fill_response(struct red_port *rp,
 		pds->logMinPdelayReqInterval = target->logMinPdelayReqInterval;
 		pds->versionNumber           = target->versionNumber;
 		datalen = sizeof(*pds);
+		if (clock_is_hsr_or_prp(target->clock)) {
+			pds->iec62439_ds.networkProtocol = transport_type(rp->trp);
+			pds->iec62439_ds.portEnabled = 1;
+			pds->iec62439_ds.dlyAsymmetry = 0;
+			pds->iec62439_ds.profileId = PROFILE_SET_L2P2P;
+			pds->iec62439_ds.vlanEnable = target->egress_vlan_tagged;
+			pds->iec62439_ds.vlanId = target->egress_vlan_id;
+			pds->iec62439_ds.vlanPrio = target->egress_vlan_prio;
+			pds->iec62439_ds.twoStepFlag = 0; /* We don't support twostep for HSR/PRP for now */
+
+			/* TODO: Not sure if other devices uses the
+			 * same definition for their clockId (based on
+			 * MAC), but ptp4l hides the transport layer from
+			 * the PTP layer so this is the best we can do
+			 * for now.
+			 */
+			memcpy(pds->iec62439_ds.peerIdentity, target->peer_portid.clockIdentity.id, 3);
+			memcpy(&pds->iec62439_ds.peerIdentity[3], &target->peer_portid.clockIdentity.id[5], 3);
+
+			pds->iec62439_ds.prpPairedPort = red_other_port(rp)->portIdentity.portNumber;
+			if (clock_type(target->clock) == CLOCK_TYPE_BOUNDARY)
+				pds->iec62439_ds.prpAttachment = PORT_TYPE_DABC;
+			else
+				pds->iec62439_ds.prpAttachment = PORT_TYPE_DATC;
+			pds->iec62439_ds.errorCounter = target->errorCounter;
+			pds->iec62439_ds.peerDelayLim = 100; /* Defined in IEC 62439-3 */
+			datalen = sizeof(*pds);
+		} else {
+			datalen = sizeof(*pds) - sizeof(struct iec62439_portDS);
+		}
 		break;
 	case MID_LOG_ANNOUNCE_INTERVAL:
 		mtd = (struct management_tlv_datum *) tlv->data;
@@ -2950,6 +2988,31 @@ static int red_port_management_fill_response(struct red_port *rp,
 		tcpds->logMinPdelayReqInterval = target->logMinPdelayReqInterval;
 		tcpds->peerMeanPathDelay       = rp->peerMeanPathDelay;
 		datalen = sizeof(*tcpds);
+		if (clock_is_hsr_or_prp(target->clock)) {
+			tcpds->iec62439_ds.portEnabled = 1;
+			tcpds->iec62439_ds.dlyAsymmetry = 0;
+			tcpds->iec62439_ds.twoStepFlag = 0; /* We don't support twostep for HSR/PRP for now */
+
+			/* TODO: Not sure if other devices uses the
+			 * same definition for their clockId (based on
+			 * MAC), but ptp4l hides the transport layer from
+			 * the PTP layer so this is the best we can do
+			 * for now.
+			 */
+			memcpy(tcpds->iec62439_ds.peerIdentity, target->peer_portid.clockIdentity.id, 3);
+			memcpy(&tcpds->iec62439_ds.peerIdentity[3], &target->peer_portid.clockIdentity.id[5], 3);
+
+			tcpds->iec62439_ds.prpPairedPort = red_other_port(rp)->portIdentity.portNumber;
+			if (clock_type(target->clock) == CLOCK_TYPE_BOUNDARY)
+				tcpds->iec62439_ds.prpAttachment = PORT_TYPE_DABC;
+			else
+				tcpds->iec62439_ds.prpAttachment = PORT_TYPE_DATC;
+			tcpds->iec62439_ds.errorCounter = target->errorCounter;
+			tcpds->iec62439_ds.peerDelayLim = 100; /* Defined in IEC 62439-3 */
+			datalen = sizeof(*tcpds);
+		} else {
+			datalen = sizeof(*tcpds) - sizeof(struct iec62439_transparent_portDS);
+		}
 		break;
 	case MID_DELAY_MECHANISM:
 		mtd = (struct management_tlv_datum *) tlv->data;

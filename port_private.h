@@ -180,6 +180,10 @@ struct port {
 	struct onestep_conversion_info onestep_info;
 	struct red_port *red_a;
 	struct red_port *red_b;
+	int egress_vlan_tagged;
+	int egress_vlan_id;
+	int egress_vlan_prio;
+	int errorCounter;
 };
 
 #define portnum(p) (p->portIdentity.portNumber)

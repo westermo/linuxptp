@@ -1008,7 +1008,40 @@ static int port_management_fill_response(struct port *target,
 		}
 		pds->logMinPdelayReqInterval = target->logMinPdelayReqInterval;
 		pds->versionNumber           = target->versionNumber;
-		datalen = sizeof(*pds);
+
+		if (clock_is_hsr_or_prp(target->clock)) {
+			pds->iec62439_ds.networkProtocol = transport_type(target->trp);
+			pds->iec62439_ds.portEnabled = 1;
+			pds->iec62439_ds.dlyAsymmetry = 0;
+			pds->iec62439_ds.profileId = PROFILE_SET_L2P2P;
+			pds->iec62439_ds.vlanEnable = target->egress_vlan_tagged;
+			pds->iec62439_ds.vlanId = target->egress_vlan_id;
+			pds->iec62439_ds.vlanPrio = target->egress_vlan_prio;
+			pds->iec62439_ds.twoStepFlag = 0; /* We don't support twostep for HSR/PRP for now */
+
+			/* TODO: Not sure if other devices uses the
+			 * same definition for their clockId (based on
+			 * MAC), but ptp4l hides the transport layer from
+			 * the PTP layer so this is the best we can do
+			 * for now.
+			 */
+			memcpy(pds->iec62439_ds.peerIdentity, target->peer_portid.clockIdentity.id, 3);
+			memcpy(&pds->iec62439_ds.peerIdentity[3], &target->peer_portid.clockIdentity.id[5], 3);
+
+			/* Over 4096 = not paired */
+			pds->iec62439_ds.prpPairedPort = 5000;
+			if (clock_type(target->clock) == CLOCK_TYPE_BOUNDARY)
+				pds->iec62439_ds.prpAttachment = PORT_TYPE_BC;
+			else if (clock_type(target->clock) == CLOCK_TYPE_ORDINARY)
+				pds->iec62439_ds.prpAttachment = PORT_TYPE_OC;
+			else
+				pds->iec62439_ds.prpAttachment = PORT_TYPE_TC;
+			pds->iec62439_ds.errorCounter = target->errorCounter;
+			pds->iec62439_ds.peerDelayLim = 100; /* Defined in IEC 62439-3 */
+			datalen = sizeof(*pds);
+		} else {
+			datalen = sizeof(*pds) - sizeof(struct iec62439_portDS);
+		}
 		break;
 	case MID_LOG_ANNOUNCE_INTERVAL:
 		mtd = (struct management_tlv_datum *) tlv->data;
@@ -1041,7 +1074,35 @@ static int port_management_fill_response(struct port *target,
 		tcpds->faultyFlag              = (target->state == PS_FAULTY);
 		tcpds->logMinPdelayReqInterval = target->logMinPdelayReqInterval;
 		tcpds->peerMeanPathDelay       = target->peerMeanPathDelay;
-		datalen = sizeof(*tcpds);
+
+		if (clock_is_hsr_or_prp(target->clock)) {
+			tcpds->iec62439_ds.portEnabled = 1;
+			tcpds->iec62439_ds.dlyAsymmetry = 0;
+			tcpds->iec62439_ds.twoStepFlag = 0; /* We don't support twostep for HSR/PRP for now */
+
+			/* TODO: Not sure if other devices uses the
+			 * same definition for their clockId (based on
+			 * MAC), but ptp4l hides the transport layer from
+			 * the PTP layer so this is the best we can do
+			 * for now.
+			 */
+			memcpy(tcpds->iec62439_ds.peerIdentity, target->peer_portid.clockIdentity.id, 3);
+			memcpy(&tcpds->iec62439_ds.peerIdentity[3], &target->peer_portid.clockIdentity.id[5], 3);
+
+				/* Over 4096 = not paired */
+			tcpds->iec62439_ds.prpPairedPort = 5000;
+			if (clock_type(target->clock) == CLOCK_TYPE_BOUNDARY)
+				tcpds->iec62439_ds.prpAttachment = PORT_TYPE_BC;
+			else if (clock_type(target->clock) == CLOCK_TYPE_ORDINARY)
+				tcpds->iec62439_ds.prpAttachment = PORT_TYPE_OC;
+			else
+				tcpds->iec62439_ds.prpAttachment = PORT_TYPE_TC;
+			tcpds->iec62439_ds.errorCounter = target->errorCounter;
+			tcpds->iec62439_ds.peerDelayLim = 100; /* Defined in IEC 62439-3 */
+			datalen = sizeof(*tcpds);
+		} else {
+			datalen = sizeof(*tcpds) - sizeof(struct iec62439_transparent_portDS);
+		}
 		break;
 	case MID_DELAY_MECHANISM:
 		mtd = (struct management_tlv_datum *) tlv->data;
@@ -3133,6 +3194,7 @@ int port_prepare_and_send(struct port *p, struct ptp_message *msg,
 		cnt = transport_send(p->trp, &p->fda, event, msg);
 	}
 	if (cnt <= 0) {
+		p->errorCounter++;
 		return -1;
 	}
 	port_stats_inc_tx(p, msg);
@@ -3536,6 +3598,13 @@ struct port *port_open(const char *phc_device,
 
 	/* p->hsr_prp_port_a = config_get_int(cfg, p->name, "hsr_prp_port_a"); */
 	/* p->hsr_prp_port_b = config_get_int(cfg, p->name, "hsr_prp_port_b"); */
+
+	p->egress_vlan_tagged = config_get_int(cfg, NULL, "egress_vlan.tagged");
+	if (p->egress_vlan_tagged) {
+		p->egress_vlan_id = config_get_int(cfg, NULL, "egress_vlan.id");
+		p->egress_vlan_prio = config_get_int(cfg, NULL, "egress_vlan.prio");
+	}
+	p->errorCounter = 0;
 
 	return p;
 

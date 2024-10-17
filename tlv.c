@@ -166,8 +166,10 @@ static int mgt_post_recv(struct management_tlv *m, uint16_t data_len,
 {
 	struct alternate_time_offset_properties *atop;
 	struct alternate_time_offset_name *aton;
+	struct transparentClockDefaultDS *tcdds;
 	struct ieee_c37_238_settings_np *pwr;
 	struct unicast_master_table_np *umtn;
+	struct transparentClockPortDS *tcpds;
 	struct grandmaster_settings_np *gsn;
 	struct port_service_stats_np *pssn;
 	struct mgmt_clock_description *cd;
@@ -295,7 +297,8 @@ static int mgt_post_recv(struct management_tlv *m, uint16_t data_len,
 		extra_len += extra->cd.userDescription->length;
 		break;
 	case MID_DEFAULT_DATA_SET:
-		if (data_len != sizeof(struct defaultDS))
+		if (data_len != sizeof(struct defaultDS)
+		    && data_len != sizeof(struct defaultDS) - sizeof(struct iec62439_defaultDS))
 			goto bad_length;
 		dds = (struct defaultDS *) m->data;
 		dds->numberPorts = ntohs(dds->numberPorts);
@@ -330,11 +333,28 @@ static int mgt_post_recv(struct management_tlv *m, uint16_t data_len,
 		tp->currentUtcOffset = ntohs(tp->currentUtcOffset);
 		break;
 	case MID_PORT_DATA_SET:
-		if (data_len != sizeof(struct portDS))
+		if (data_len != sizeof(struct portDS)
+		    && data_len != sizeof(struct portDS) - sizeof(struct iec62439_portDS))
 			goto bad_length;
 		p = (struct portDS *) m->data;
 		p->portIdentity.portNumber = ntohs(p->portIdentity.portNumber);
 		p->peerMeanPathDelay = net2host64(p->peerMeanPathDelay);
+
+		if (data_len != sizeof(struct portDS))
+			break;
+		p->iec62439_ds.networkProtocol = ntohs(p->iec62439_ds.networkProtocol);
+		p->iec62439_ds.portEnabled = ntohl(p->iec62439_ds.portEnabled);
+		p->iec62439_ds.dlyAsymmetry = net2host64(p->iec62439_ds.dlyAsymmetry);
+		p->iec62439_ds.profileId = ntohl(p->iec62439_ds.profileId);
+		p->iec62439_ds.vlanEnable = ntohl(p->iec62439_ds.vlanEnable);
+		p->iec62439_ds.vlanId = ntohl(p->iec62439_ds.vlanId);
+		p->iec62439_ds.vlanPrio = ntohl(p->iec62439_ds.vlanPrio);
+		p->iec62439_ds.twoStepFlag = ntohl(p->iec62439_ds.twoStepFlag);
+		/* Don't modify peerIdentity? */
+		p->iec62439_ds.prpAttachment = ntohl(p->iec62439_ds.prpAttachment);
+		p->iec62439_ds.prpPairedPort = ntohs(p->iec62439_ds.prpPairedPort);
+		p->iec62439_ds.errorCounter = ntohl(p->iec62439_ds.errorCounter);
+		p->iec62439_ds.peerDelayLim = net2host64(p->iec62439_ds.peerDelayLim);
 		break;
 	case MID_ALTERNATE_TIME_OFFSET_NAME:
 		aton = (struct alternate_time_offset_name *) m->data;
@@ -481,6 +501,37 @@ static int mgt_post_recv(struct management_tlv *m, uint16_t data_len,
 		NTOHL(pwr->networkTimeInaccuracy);
 		NTOHL(pwr->totalTimeInaccuracy);
 		break;
+	case MID_TRANSPARENT_CLOCK_PORT_DATA_SET:
+		if (data_len != sizeof(struct transparentClockPortDS)
+		    && data_len != sizeof(struct transparentClockPortDS) - sizeof(struct iec62439_transparent_portDS))
+			goto bad_length;
+		tcpds = (struct transparentClockPortDS *) m->data;
+		tcpds->portIdentity.portNumber = ntohs(tcpds->portIdentity.portNumber);
+		tcpds->peerMeanPathDelay = net2host64(tcpds->peerMeanPathDelay);
+
+		if (data_len != sizeof(struct transparentClockPortDS))
+			break;
+		tcpds->iec62439_ds.portEnabled = ntohl(tcpds->iec62439_ds.portEnabled);
+		tcpds->iec62439_ds.dlyAsymmetry = net2host64(tcpds->iec62439_ds.dlyAsymmetry);
+		tcpds->iec62439_ds.twoStepFlag = ntohl(tcpds->iec62439_ds.twoStepFlag);
+		/* /\* Don't modify peerIdentity? *\/ */
+		tcpds->iec62439_ds.prpAttachment = ntohl(tcpds->iec62439_ds.prpAttachment);
+		tcpds->iec62439_ds.prpPairedPort = ntohs(tcpds->iec62439_ds.prpPairedPort);
+		tcpds->iec62439_ds.errorCounter = ntohl(tcpds->iec62439_ds.errorCounter);
+		tcpds->iec62439_ds.peerDelayLim = net2host64(tcpds->iec62439_ds.peerDelayLim);
+		break;
+	case MID_TRANSPARENT_CLOCK_DEFAULT_DATA_SET:
+		if (data_len != sizeof(struct transparentClockDefaultDS)
+		    && data_len != sizeof(struct transparentClockDefaultDS) - sizeof(struct iec62439_transparent_defaultDS))
+			goto bad_length;
+		tcdds = (struct transparentClockDefaultDS *) m->data;
+		tcdds->numberPorts = ntohs(tcdds->numberPorts);
+
+		if (data_len != sizeof(struct transparentClockDefaultDS))
+			break;
+		tcdds->iec62439_ds.profileSet = ntohl(tcdds->iec62439_ds.profileSet);
+		tcdds->iec62439_ds.timeInaccuracy = net2host64(tcdds->iec62439_ds.timeInaccuracy);
+		break;
 	case MID_SAVE_IN_NON_VOLATILE_STORAGE:
 	case MID_RESET_NON_VOLATILE_STORAGE:
 	case MID_INITIALIZE:
@@ -505,8 +556,10 @@ bad_length:
 static void mgt_pre_send(struct management_tlv *m, struct tlv_extra *extra)
 {
 	struct alternate_time_offset_properties *atop;
+	struct transparentClockDefaultDS *tcdds;
 	struct ieee_c37_238_settings_np *pwr;
 	struct unicast_master_table_np *umtn;
+	struct transparentClockPortDS *tcpds;
 	struct grandmaster_settings_np *gsn;
 	struct port_service_stats_np *pssn;
 	struct mgmt_clock_description *cd;
@@ -566,6 +619,22 @@ static void mgt_pre_send(struct management_tlv *m, struct tlv_extra *extra)
 		p = (struct portDS *) m->data;
 		p->portIdentity.portNumber = htons(p->portIdentity.portNumber);
 		p->peerMeanPathDelay = host2net64(p->peerMeanPathDelay);
+
+		/* Set all fields regardless of if HSR/PRP mode is on.
+		 * The data is truncated when sent. */
+		p->iec62439_ds.networkProtocol = htons(p->iec62439_ds.networkProtocol);
+		p->iec62439_ds.portEnabled = htonl(p->iec62439_ds.portEnabled);
+		p->iec62439_ds.dlyAsymmetry = host2net64(p->iec62439_ds.dlyAsymmetry);
+		p->iec62439_ds.profileId = htonl(p->iec62439_ds.profileId);
+		p->iec62439_ds.vlanEnable = htonl(p->iec62439_ds.vlanEnable);
+		p->iec62439_ds.vlanId = htonl(p->iec62439_ds.vlanId);
+		p->iec62439_ds.vlanPrio = htonl(p->iec62439_ds.vlanPrio);
+		p->iec62439_ds.twoStepFlag = htonl(p->iec62439_ds.twoStepFlag);
+		/* Don't modify peerIdentity? */
+		p->iec62439_ds.prpAttachment = htonl(p->iec62439_ds.prpAttachment);
+		p->iec62439_ds.prpPairedPort = htons(p->iec62439_ds.prpPairedPort);
+		p->iec62439_ds.errorCounter = htonl(p->iec62439_ds.errorCounter);
+		p->iec62439_ds.peerDelayLim = host2net64(p->iec62439_ds.peerDelayLim);
 		break;
 	case MID_ALTERNATE_TIME_OFFSET_NAME:
 		break;
@@ -671,6 +740,27 @@ static void mgt_pre_send(struct management_tlv *m, struct tlv_extra *extra)
 		HTONL(pwr->grandmasterTimeInaccuracy);
 		HTONL(pwr->networkTimeInaccuracy);
 		HTONL(pwr->totalTimeInaccuracy);
+		break;
+	case MID_TRANSPARENT_CLOCK_PORT_DATA_SET:
+		tcpds = (struct transparentClockPortDS *) m->data;
+		tcpds->portIdentity.portNumber = htons(tcpds->portIdentity.portNumber);
+		tcpds->peerMeanPathDelay = host2net64(tcpds->peerMeanPathDelay);
+
+		tcpds->iec62439_ds.portEnabled = htonl(tcpds->iec62439_ds.portEnabled);
+		tcpds->iec62439_ds.dlyAsymmetry = host2net64(tcpds->iec62439_ds.dlyAsymmetry);
+		tcpds->iec62439_ds.twoStepFlag = htonl(tcpds->iec62439_ds.twoStepFlag);
+		/* /\* Don't modify peerIdentity? *\/ */
+		tcpds->iec62439_ds.prpAttachment = htonl(tcpds->iec62439_ds.prpAttachment);
+		tcpds->iec62439_ds.prpPairedPort = htons(tcpds->iec62439_ds.prpPairedPort);
+		tcpds->iec62439_ds.errorCounter = htonl(tcpds->iec62439_ds.errorCounter);
+		tcpds->iec62439_ds.peerDelayLim = host2net64(tcpds->iec62439_ds.peerDelayLim);
+		break;
+	case MID_TRANSPARENT_CLOCK_DEFAULT_DATA_SET:
+		tcdds = (struct transparentClockDefaultDS *) m->data;
+		tcdds->numberPorts = htons(tcdds->numberPorts);
+
+		tcdds->iec62439_ds.profileSet = htonl(tcdds->iec62439_ds.profileSet);
+		tcdds->iec62439_ds.timeInaccuracy = host2net64(tcdds->iec62439_ds.timeInaccuracy);
 		break;
 	}
 }
