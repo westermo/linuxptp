@@ -41,6 +41,46 @@ static struct pmc *pmc;
 #define IFMT "\n\t\t"
 #define P41 ((double)(1ULL << 41))
 
+static const char *port_attachment2str(enum portAttachmentType t)
+{
+	switch (t) {
+        case PORT_TYPE_NOT_SPECIFIED:
+		return "NOT_SPECIFIED";
+        case PORT_TYPE_OC:
+		return "OC";
+        case PORT_TYPE_BC:
+		return "BC";
+        case PORT_TYPE_TC:
+		return "TC";
+        case PORT_TYPE_BOUNDARY_NODE:
+		return "BOUNDARY_NODE";
+        case PORT_TYPE_DAN_OC:
+		return "DAN_OC";
+        case PORT_TYPE_DABC:
+		return "DABC";
+        case PORT_TYPE_DATC:
+		return "DATC";
+        case PORT_TYPE_SLTC:
+		return "SLTC";
+        default:
+		return "UNKNOWN";
+	}
+}
+
+static const char *profile_set2str(int set)
+{
+	switch (set) {
+	case PROFILE_SET_L2P2P:
+		return "L2P2P";
+	case PROFILE_SET_L3E2E:
+		return "L3E2E";
+	case PROFILE_SET_61850_9_3:
+		return "61850-9-3";
+	default:
+		return "UNKNOWN";
+	}
+}
+
 static char *text2str(struct PTPText *text)
 {
 	static struct static_ptp_text s;
@@ -272,6 +312,18 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 			dds->priority2,
 			cid2str(&dds->clockIdentity),
 			dds->domainNumber);
+
+		/* If we received the full extended IEC 62439-3 dataset */
+		if (mgt->length == 2 + sizeof(struct defaultDS)) {
+			fprintf(fp,
+				IFMT "profileSet              %s"
+				IFMT "timeInaccuracy          %f"
+				IFMT "offsetFromMasterLim     %u",
+				profile_set2str(dds->iec62439_ds.profileSet),
+				(float)dds->iec62439_ds.timeInaccuracy / (1<<16),
+				dds->iec62439_ds.offsetFromMasterLim);
+		}
+		break;
 		break;
 	case MID_CURRENT_DATA_SET:
 		cds = (struct currentDS *) mgt->data;
@@ -411,6 +463,15 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 			tcds->numberPorts,
 			tcds->delayMechanism,
 			tcds->primaryDomain);
+
+		/* If we received the full extended IEC 62439-3 dataset */
+		if (mgt->length == 2 + sizeof(struct transparentClockDefaultDS)) {
+			fprintf(fp,
+				IFMT "profileSet              %s"
+				IFMT "timeInaccuracy          %ld",
+				profile_set2str(tcds->iec62439_ds.profileSet),
+				tcds->iec62439_ds.timeInaccuracy);
+		}
 		break;
 	case MID_TIME_STATUS_NP:
 		tsn = (struct time_status_np *) mgt->data;
@@ -479,7 +540,7 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 		break;
 	case MID_PORT_DATA_SET:
 		p = (struct portDS *) mgt->data;
-		if (p->portState > PS_SLAVE && p->portState != PS_PASSIVE_SLAVE) {
+		if (p->portState > PS_PASSIVE_SLAVE) {
 			p->portState = 0;
 		}
 		fprintf(fp, "PORT_DATA_SET "
@@ -499,6 +560,40 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 			p->logSyncInterval, p->delayMechanism,
 			p->logMinPdelayReqInterval,
 			p->versionNumber & MAJOR_VERSION_MASK);
+
+		/* If we received the full extended IEC 62439-3 dataset */
+		if (mgt->length == 2 + sizeof(struct portDS)) {
+			fprintf(fp,
+				IFMT "portEnabled             %s"
+				IFMT "dlyAsymmetry            %ld"
+				IFMT "profileId               %s"
+				IFMT "vlanEnable              %s"
+				IFMT "vlanId                  %d"
+				IFMT "vlanPrio                %d"
+				IFMT "twoStepFlag             %s"
+				IFMT "peerIdentity            %02x:%02x:%02x:%02x:%02x:%02x"
+				IFMT "prpAttachment           %s"
+				IFMT "prpPairedPort           %d"
+				IFMT "errorCounter            %u"
+				IFMT "peerDelayLim            %ld",
+				p->iec62439_ds.portEnabled ? "true" : "false",
+				p->iec62439_ds.dlyAsymmetry,
+				profile_set2str(p->iec62439_ds.profileId),
+				p->iec62439_ds.vlanEnable ? "true" : "false",
+				p->iec62439_ds.vlanId,
+				p->iec62439_ds.vlanPrio,
+				p->iec62439_ds.twoStepFlag ? "true" : "false",
+				p->iec62439_ds.peerIdentity[0],
+				p->iec62439_ds.peerIdentity[1],
+				p->iec62439_ds.peerIdentity[2],
+				p->iec62439_ds.peerIdentity[3],
+				p->iec62439_ds.peerIdentity[4],
+				p->iec62439_ds.peerIdentity[5],
+				port_attachment2str(p->iec62439_ds.prpAttachment),
+				p->iec62439_ds.prpPairedPort,
+				p->iec62439_ds.errorCounter,
+				p->iec62439_ds.peerDelayLim);
+		}
 		break;
 	case MID_PORT_DATA_SET_NP:
 		pnp = (struct port_ds_np *) mgt->data;
@@ -510,7 +605,7 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 		break;
 	case MID_PORT_PROPERTIES_NP:
 		ppn = (struct port_properties_np *) mgt->data;
-		if (ppn->port_state > PS_SLAVE && ppn->port_state != PS_PASSIVE_SLAVE) {
+		if (ppn->port_state > PS_PASSIVE_SLAVE) {
 			ppn->port_state = 0;
 		}
 		fprintf(fp, "PORT_PROPERTIES_NP "
@@ -667,6 +762,32 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 			pid2str(&tcpds->portIdentity), tcpds->faultyFlag,
 			tcpds->logMinPdelayReqInterval,
 			tcpds->peerMeanPathDelay >> 16);
+
+		/* If we received the full extended IEC 62439-3 dataset */
+		if (mgt->length == 2 + sizeof(struct transparentClockPortDS)) {
+			fprintf(fp,
+				IFMT "portEnabled             %s"
+				IFMT "dlyAsymmetry            %ld"
+				IFMT "twoStepFlag             %s"
+				IFMT "peerIdentity            %02x:%02x:%02x:%02x:%02x:%02x"
+				IFMT "prpAttachment           %s"
+				IFMT "prpPairedPort           %d"
+				IFMT "errorCounter            %u"
+				IFMT "peerDelayLim            %ld",
+				tcpds->iec62439_ds.portEnabled ? "true" : "false",
+				tcpds->iec62439_ds.dlyAsymmetry,
+				tcpds->iec62439_ds.twoStepFlag ? "true" : "false",
+				tcpds->iec62439_ds.peerIdentity[0],
+				tcpds->iec62439_ds.peerIdentity[1],
+				tcpds->iec62439_ds.peerIdentity[2],
+				tcpds->iec62439_ds.peerIdentity[3],
+				tcpds->iec62439_ds.peerIdentity[4],
+				tcpds->iec62439_ds.peerIdentity[5],
+				port_attachment2str(tcpds->iec62439_ds.prpAttachment),
+				tcpds->iec62439_ds.prpPairedPort,
+				tcpds->iec62439_ds.errorCounter,
+				tcpds->iec62439_ds.peerDelayLim);
+		}
 		break;
 	case MID_DELAY_MECHANISM:
 		mtd = (struct management_tlv_datum *) mgt->data;

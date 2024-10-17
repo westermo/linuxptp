@@ -295,7 +295,8 @@ static int mgt_post_recv(struct management_tlv *m, uint16_t data_len,
 		extra_len += extra->cd.userDescription->length;
 		break;
 	case MID_DEFAULT_DATA_SET:
-		if (data_len != sizeof(struct defaultDS))
+		if (data_len != sizeof(struct defaultDS)
+		    && data_len != sizeof(struct defaultDS) - sizeof(struct iec62439_defaultDS))
 			goto bad_length;
 		dds = (struct defaultDS *) m->data;
 		dds->numberPorts = ntohs(dds->numberPorts);
@@ -330,11 +331,24 @@ static int mgt_post_recv(struct management_tlv *m, uint16_t data_len,
 		tp->currentUtcOffset = ntohs(tp->currentUtcOffset);
 		break;
 	case MID_PORT_DATA_SET:
-		if (data_len != sizeof(struct portDS))
+		if (data_len != sizeof(struct portDS)
+		    && data_len != sizeof(struct portDS) - sizeof(struct iec62439_portDS))
 			goto bad_length;
 		p = (struct portDS *) m->data;
 		p->portIdentity.portNumber = ntohs(p->portIdentity.portNumber);
 		p->peerMeanPathDelay = net2host64(p->peerMeanPathDelay);
+		/* p->iec62439_ds.portEnabled = ntohl(p->iec62439_ds.portEnabled); */
+		/* p->iec62439_ds.dlyAsymmetry = net2host64(p->iec62439_ds.dlyAsymmetry); */
+		/* p->iec62439_ds.profileId = ntohl(p->iec62439_ds.profileId); */
+		/* p->iec62439_ds.vlanEnable = ntohl(p->iec62439_ds.vlanEnable); */
+		/* p->iec62439_ds.vlanId = ntohl(p->iec62439_ds.vlanId); */
+		/* p->iec62439_ds.vlanPrio = ntohl(p->iec62439_ds.vlanPrio); */
+		/* p->iec62439_ds.twoStepFlag = ntohl(p->iec62439_ds.twoStepFlag); */
+		/* 	/\* p->iec62439_ds.peerIdentity[0]; *\/ */
+		/* /\* p->iec62439_ds.prpAttachment; *\/ */
+		/* p->iec62439_ds.prpPairedPort = ntohs(p->iec62439_ds.prpPairedPort); */
+		/* p->iec62439_ds.errorCounter = ntohl(p->iec62439_ds.errorCounter); */
+		/* p->iec62439_ds.peerDelayLim = net2host64(p->iec62439_ds.peerDelayLim); */
 		break;
 	case MID_ALTERNATE_TIME_OFFSET_NAME:
 		aton = (struct alternate_time_offset_name *) m->data;
@@ -566,6 +580,18 @@ static void mgt_pre_send(struct management_tlv *m, struct tlv_extra *extra)
 		p = (struct portDS *) m->data;
 		p->portIdentity.portNumber = htons(p->portIdentity.portNumber);
 		p->peerMeanPathDelay = host2net64(p->peerMeanPathDelay);
+		/* p->iec62439_ds.portEnabled = htonl(p->iec62439_ds.portEnabled); */
+		/* p->iec62439_ds.dlyAsymmetry = host2net64(p->iec62439_ds.dlyAsymmetry); */
+		/* p->iec62439_ds.profileId = htonl(p->iec62439_ds.profileId); */
+		/* p->iec62439_ds.vlanEnable = htonl(p->iec62439_ds.vlanEnable); */
+		/* p->iec62439_ds.vlanId = htonl(p->iec62439_ds.vlanId); */
+		/* p->iec62439_ds.vlanPrio = htonl(p->iec62439_ds.vlanPrio); */
+		/* p->iec62439_ds.twoStepFlag = htonl(p->iec62439_ds.twoStepFlag); */
+			/* p->iec62439_ds.peerIdentity[0]; */
+		/* p->iec62439_ds.prpAttachment; */
+		/* p->iec62439_ds.prpPairedPort = htons(p->iec62439_ds.prpPairedPort); */
+		/* p->iec62439_ds.errorCounter = htonl(p->iec62439_ds.errorCounter); */
+		/* p->iec62439_ds.peerDelayLim = host2net64(p->iec62439_ds.peerDelayLim); */
 		break;
 	case MID_ALTERNATE_TIME_OFFSET_NAME:
 		break;

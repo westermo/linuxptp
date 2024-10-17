@@ -371,6 +371,7 @@ static void tc_complete_response(struct port *q, struct port *p,
 	cnt = transport_send(p->trp, &p->fda, TRANS_GENERAL, resp);
 	if (cnt <= 0) {
 		pr_err("tc failed to forward response on %s", p->log_name);
+		p->errorCounter++;
 		port_dispatch(p, EV_FAULT_DETECTED, 0);
 	}
 	/* Restore original correction value for next egress port. */
@@ -433,6 +434,7 @@ static void tc_complete_syfup(struct port *q, struct port *p,
 	cnt = transport_send(p->trp, &p->fda, TRANS_GENERAL, fup);
 	if (cnt <= 0) {
 		pr_err("tc failed to forward follow up on %s", p->log_name);
+		p->errorCounter++;
 		port_dispatch(p, EV_FAULT_DETECTED, 0);
 	}
 	/* Restore original correction value for next egress port. */
@@ -516,6 +518,7 @@ static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 		if (cnt <= 0) {
 			pr_err("failed to forward event from %s to %s",
 				q->log_name, p->log_name);
+			p->errorCounter++;
 			port_dispatch(p, EV_FAULT_DETECTED, 0);
 		}
 
@@ -726,6 +729,7 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 		if (cnt <= 0) {
 			pr_err("tc failed to forward message on %s",
 			       p->log_name);
+			p->errorCounter++;
 			port_dispatch(p, EV_FAULT_DETECTED, 0);
 		}
 		if (clock_is_hsr(q->clock)) {
@@ -821,6 +825,7 @@ int tc_fwd_response(struct port *q, struct ptp_message *msg)
 				tc_prp_clear_resp_port_number_bits(q, msg);
 			}
 			if ((transport_send(p->trp, &p->fda, TRANS_GENERAL, msg)) <= 0) {
+				p->errorCounter++;
 				pr_err("tc failed to forward response on port %d", portnum(p));
 				port_dispatch(p, EV_FAULT_DETECTED, 0);
 			}

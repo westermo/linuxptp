@@ -19,6 +19,7 @@
 #ifndef HAVE_PORT_PRIVATE_H
 #define HAVE_PORT_PRIVATE_H
 
+#include <linux/if_ether.h>
 #include <sys/queue.h>
 
 #include "as_capable.h"
@@ -181,6 +182,10 @@ struct port {
         bool hsr_prp_port_b;
 	struct port *paired_port;
 	struct onestep_conversion_info onestep_info;
+	int egress_vlan_tagged;
+	int egress_vlan_id;
+	int egress_vlan_prio;
+	int errorCounter;
 };
 
 #define portnum(p) (p->portIdentity.portNumber)

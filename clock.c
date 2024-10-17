@@ -455,8 +455,13 @@ static int clock_management_fill_response(struct clock *c, struct port *p,
 		datalen = 1 + text->length;
 		break;
 	case MID_DEFAULT_DATA_SET:
-		memcpy(tlv->data, &c->dds, sizeof(c->dds));
-		datalen = sizeof(c->dds);
+		if (clock_is_hsr_or_prp(c)) {
+			datalen = sizeof(c->dds);
+			memcpy(tlv->data, &c->dds, datalen);
+		} else {
+			datalen = sizeof(c->dds) - sizeof(struct iec62439_defaultDS);
+			memcpy(tlv->data, &c->dds, datalen);
+		}
 		break;
 	case MID_CURRENT_DATA_SET:
 		memcpy(tlv->data, &c->cur, sizeof(c->cur));
@@ -549,7 +554,14 @@ static int clock_management_fill_response(struct clock *c, struct port *p,
 		memcpy(&tcds->numberPorts, &c->dds.numberPorts, sizeof(tcds->numberPorts));
 		tcds->delayMechanism = port_delay_mechanism(clock_first_port(c));
 		memcpy(&tcds->primaryDomain, &c->dds.domainNumber, sizeof(tcds->primaryDomain));
-		datalen = sizeof(struct transparentClockDefaultDS);
+
+		if (clock_is_hsr_or_prp(c)) {
+			tcds->iec62439_ds.profileSet = c->dds.iec62439_ds.profileSet;
+			tcds->iec62439_ds.timeInaccuracy = c->dds.iec62439_ds.timeInaccuracy;
+			datalen = sizeof(struct transparentClockDefaultDS);
+		} else {
+			datalen = sizeof(struct transparentClockDefaultDS) - sizeof(struct iec62439_transparent_defaultDS);
+		}
 		break;
 	case MID_TIME_STATUS_NP:
 		tsn = (struct time_status_np *) tlv->data;
@@ -1152,6 +1164,10 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 		config_get_int(config, NULL, "clockAccuracy");
 	c->dds.clockQuality.offsetScaledLogVariance =
 		config_get_int(config, NULL, "offsetScaledLogVariance");
+
+	c->dds.iec62439_ds.offsetFromMasterLim = 50;
+	c->dds.iec62439_ds.profileSet = PROFILE_SET_L2P2P;
+	c->dds.iec62439_ds.timeInaccuracy = 50 * (1 << 16);
 
 	c->desc.productDescription.max_symbols = 64;
 	c->desc.revisionData.max_symbols = 32;
@@ -2389,4 +2405,9 @@ bool clock_is_hsr(struct clock *c)
 bool clock_is_prp(struct clock *c)
 {
 	return c->hsr_prp_mode == HSR_PRP_MODE_PRP;
+}
+
+bool clock_is_hsr_or_prp(struct clock *c)
+{
+	return clock_is_hsr(c) || clock_is_prp(c);
 }

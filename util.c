@@ -48,8 +48,8 @@ const char *ps_str[] = {
 	"PASSIVE",
 	"UNCALIBRATED",
 	"SLAVE",
-	"GRAND_MASTER",
 	"PASSIVE_SLAVE",
+	"GRAND_MASTER",
 };
 
 const char *ev_str[] = {
