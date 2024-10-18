@@ -129,21 +129,21 @@ int dscmp(struct dataset *a, struct dataset *b)
 	return diff < 0 ? A_BETTER : B_BETTER;
 }
 
-static char *compare_to_str(int res)
-{
-	switch (res) {
-	case A_BETTER:
-		return "A_BETTER";
-	case B_BETTER:
-		return "B_BETTER";
-	case A_BETTER_TOPO:
-		return "A_BETTER_TOPO";
-	case B_BETTER_TOPO:
-		return "B_BETTER_TOPO";
-	default:
-		return "EQUAL";
-	}
-}
+/* static char *compare_to_str(int res) */
+/* { */
+/* 	switch (res) { */
+/* 	case A_BETTER: */
+/* 		return "A_BETTER"; */
+/* 	case B_BETTER: */
+/* 		return "B_BETTER"; */
+/* 	case A_BETTER_TOPO: */
+/* 		return "A_BETTER_TOPO"; */
+/* 	case B_BETTER_TOPO: */
+/* 		return "B_BETTER_TOPO"; */
+/* 	default: */
+/* 		return "EQUAL"; */
+/* 	} */
+/* } */
 
 /* static void print_compare(const char *a_str, const char *b_str, int res) */
 /* { */
@@ -231,10 +231,11 @@ static enum port_state hsr_state_decision(struct clock *c, struct port *r,
 			return PS_MASTER;
 		}
 		/* IEC62439-3: A.5.4. d) Redundant MASTER */
-		if (clock_type(c) != CLOCK_TYPE_E2E && clock_type(c) != CLOCK_TYPE_P2P) {
-			pr_debug("State %s: PS_PASSIVE 1\n", port_log_name(r));
-			return PS_PASSIVE;
-		}
+		/* Currently dead code. Only relevant for BC */
+	/* 	if (clock_type(c) != CLOCK_TYPE_E2E && clock_type(c) != CLOCK_TYPE_P2P) { */
+	/* 		pr_debug("State %s: PS_PASSIVE 1\n", port_log_name(r)); */
+	/* 		return PS_PASSIVE; */
+	/* 	} */
 	}
 	/* IEC62439-3: A.5.4. d) Redundant MASTER */
 	if (clock_type(c) != CLOCK_TYPE_E2E && clock_type(c) != CLOCK_TYPE_P2P) {
