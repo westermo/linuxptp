@@ -2275,7 +2275,10 @@ static void handle_state_decision_event(struct clock *c)
 		best_id = c->dds.clockIdentity;
 	}
 
-	if (!cid_eq(&best_id, &c->best_id) || best != c->best) {
+	/* For HSR/PRP we may have the same CID but different objects due to redundancy ports.
+	 * Don't constantly trigger 'selected best master' for receiving RedBox.
+	 */
+	if (!cid_eq(&best_id, &c->best_id) || (best != c->best && !clock_is_hsr_or_prp(c))) {
 		clock_freq_est_reset(c);
 		if (c->sanity_check)
 			clockcheck_reset(c->sanity_check);
@@ -2389,4 +2392,9 @@ bool clock_is_hsr(struct clock *c)
 bool clock_is_prp(struct clock *c)
 {
 	return c->hsr_prp_mode == HSR_PRP_MODE_PRP;
+}
+
+bool clock_is_hsr_or_prp(struct clock *c)
+{
+	return clock_is_hsr(c) || clock_is_prp(c);
 }
