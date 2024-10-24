@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sched.h>
 
 #include "clock.h"
 #include "config.h"
@@ -179,6 +180,16 @@ int main(int argc, char *argv[])
 
 	if (config && (c = config_read(config, cfg))) {
 		return c;
+	}
+
+	if (config_get_int(cfg, NULL, "set_process_priority")) {
+		/* Set daemon priority */
+		struct sched_param schedp = { .sched_priority = 49 };
+		if (sched_setscheduler(0, SCHED_FIFO, &schedp))
+			pr_err("Failed raising ptp4l priority: %m");
+
+		/* Set ptp kworker priority */
+		system("pgrep -f \"ptp[0-9]+$\" | xargs -I {} chrt -f -p 75 {}");
 	}
 
 	print_set_progname(progname);
