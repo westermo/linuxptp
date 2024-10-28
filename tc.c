@@ -773,6 +773,11 @@ static int tc_twostep_to_onestep_syfup(struct port *q, struct ptp_message *msg)
 		// Got Fup first, send Sync with Fup info
 		msg->sync.originTimestamp = q->onestep_info.originTimestamp;
 		msg->header.flagField[0] &= ~TWO_STEP;
+	} else {
+		/* Got 2 Sync or 2 Fup in a row with the same SeqId.
+		 * Discard. Otherwise this ends up forwarding a
+		 * 2-step version of the message.*/
+		return 0;
 	}
 
 	q->onestep_info.valid = false;
