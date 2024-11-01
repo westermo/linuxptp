@@ -536,6 +536,7 @@ static int tc_twostep_to_onestep_syfup(struct port *q, struct ptp_message *msg)
 		/* Got 2 Sync or 2 Fup in a row with the same SeqId.
 		 * Discard. Otherwise this ends up forwarding a
 		 * 2-step version of the message.*/
+		pr_err("Got 2 twostep-Sync or 2 Fup in a row with the same SeqId. Can't convert to onestep");
 		return 0;
 	}
 
