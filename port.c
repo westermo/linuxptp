@@ -3622,7 +3622,7 @@ static void port_set_hw_path_delay(struct port *p)
 	Integer64 value;
 	int err;
 
-	if (!clock_is_hsr(p->clock) || !port_get_paired(p))
+	if (!clock_is_tc_hw_fwd(p->clock) && (!clock_is_hsr(p->clock) || !port_get_paired(p)))
 		return;
 
 	/* Include ingr/egr latency for HW forwarded packets.

@@ -152,6 +152,7 @@ struct clock {
 	double freq;
 	double max_freq;
 	enum hsr_prp_mode hsr_prp_mode;
+	int tc_hw_fwd;
 };
 
 struct clock the_clock;
@@ -1471,6 +1472,7 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 	c->dds.numberPorts = c->nports;
 
 	c->hsr_prp_mode = config_get_int(config, NULL, "hsr_prp_mode");
+	c->tc_hw_fwd = config_get_int(config, NULL, "tc_hw_fwd");
 
 	if (c->hsr_prp_mode != HSR_PRP_MODE_NONE) {
 		LIST_FOREACH(p, &c->ports, list) {
@@ -2375,3 +2377,7 @@ bool clock_tc_syntonize(struct clock *c)
 	return c->tc_syntonize;
 }
 
+bool clock_is_tc_hw_fwd(struct clock *c)
+{
+	return c->tc_hw_fwd;
+}
