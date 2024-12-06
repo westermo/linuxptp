@@ -392,6 +392,7 @@ struct config_item config_tab[] = {
 	PORT_ITEM_INT("hsr_prp_port_a", 0, 0, 1),
 	PORT_ITEM_INT("hsr_prp_port_b", 0, 0, 1),
 	GLOB_ITEM_INT("set_process_priority", 0, 0, 1),
+	GLOB_ITEM_INT("tc_hw_fwd", 0, 0, 1),
 };
 
 static struct unicast_master_table *current_uc_mtab;

@@ -61,6 +61,9 @@ static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 	if (portnum(p) == 0) {
 		return 1;
 	}
+	if (clock_is_tc_hw_fwd(q->clock)) {
+		return 1;
+	}
 	if (!q->tc_spanning_tree) {
 		return 0;
 	}
