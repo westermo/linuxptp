@@ -201,7 +201,10 @@ struct ts2phc_clock *ts2phc_clock_add(struct ts2phc_private *priv,
 	c->servo_state = SERVO_UNLOCKED;
 	c->servo = ts2phc_servo_create(priv, c);
 	c->no_adj = config_get_int(priv->cfg, NULL, "free_running");
-	err = asprintf(&c->name, "/dev/ptp%d", phc_index);
+	if (config_get_int(priv->cfg, NULL, "ts2phc.port_names"))
+		err = asprintf(&c->name, "%s", device);
+	else
+		err = asprintf(&c->name, "/dev/ptp%d", phc_index);
 	if (err < 0) {
 		free(c);
 		posix_clock_close(clkid);

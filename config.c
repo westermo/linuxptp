@@ -364,6 +364,7 @@ struct config_item config_tab[] = {
 	PORT_ITEM_STR("ts2phc.gpio_enable_chip", NULL),
 	PORT_ITEM_INT("ts2phc.gpio_enable_pin", -1, 0, INT_MAX),
 	PORT_ITEM_INT("ts2phc.gpio_master", 0, 0, 1),
+	GLOB_ITEM_INT("ts2phc.port_names", 0, 0, 1),
 	PORT_ITEM_ENU("tsproc_mode", TSPROC_FILTER, tsproc_enu),
 	GLOB_ITEM_INT("twoStepFlag", 1, 0, 1),
 	GLOB_ITEM_INT("tx_timestamp_timeout", 10, 1, INT_MAX),
