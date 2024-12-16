@@ -186,7 +186,7 @@ static enum port_state hsr_state_decision(struct clock *c, struct port *r,
 	if (compare(port_best, clock_best) == 0 || compare(pair_best, clock_best) == 0) {
 		if (compare(port_best, pair_best) > 0) {
 			/* Sticky: stay passive if other port is active */
-			if (port_state(q) == PS_UNCALIBRATED) {
+			if (port_state(q) == PS_UNCALIBRATED || port_state(q) == PS_SLAVE) {
 				pr_debug("State %s: PS_PASSIVE_SLAVE 1\n", port_log_name(r));
 				return PS_PASSIVE_SLAVE;
 			}
@@ -194,7 +194,7 @@ static enum port_state hsr_state_decision(struct clock *c, struct port *r,
 			return PS_SLAVE;
 		} else {
 			/* Sticky: stay active if other port is
-			 * passive. If we are comming directly from
+			 * passive. If we are coming directly from
 			 * MASTER it's an indication of
 			 * ANNOUNCE_RECEIPT_TIMEOUT on this port. Don't
 			 * behave like sticky in this case.
@@ -225,20 +225,28 @@ static enum port_state hsr_state_decision(struct clock *c, struct port *r,
 	 * A_BETTER_TOPO means better topology (fewer stepsRemoved)
 	 */
 	if (res1 > 0 && res2 > 0) {
-		/* /\* IEC62439-3: A.5.4. a) Active MASTER *\/ */
-		if (res1 >= A_BETTER && res2 >= A_BETTER) {
-			pr_debug("State %s: PS_MASTER 2\n", port_log_name(r));
-			return PS_MASTER;
+		if (clock_type(c) == CLOCK_TYPE_BOUNDARY) {
+			/* BC */
+			if (res1 == A_BETTER && res2 == A_BETTER) {
+				/* IEC62439-3: A.5.4. a) Active MASTER */
+				pr_debug("State %s: PS_MASTER 2\n", port_log_name(r));
+				return PS_MASTER;
+			} else {
+				/* IEC62439-3: A.5.4. d) Redundant MASTER */
+				pr_debug("State %s: PS_PASSIVE 1\n", port_log_name(r));
+				return PS_PASSIVE;
+			}
+		} else {
+			/* TC */
+			if (res1 >= A_BETTER && res2 >= A_BETTER) {
+				/* IEC62439-3: A.5.4. a) Active MASTER (redundant master not possible) */
+				pr_debug("State %s: PS_MASTER 3\n", port_log_name(r));
+				return PS_MASTER;
+			}
 		}
-		/* IEC62439-3: A.5.4. d) Redundant MASTER */
-		/* Currently dead code. Only relevant for BC */
-	/* 	if (clock_type(c) != CLOCK_TYPE_E2E && clock_type(c) != CLOCK_TYPE_P2P) { */
-	/* 		pr_debug("State %s: PS_PASSIVE 1\n", port_log_name(r)); */
-	/* 		return PS_PASSIVE; */
-	/* 	} */
 	}
 	/* IEC62439-3: A.5.4. d) Redundant MASTER */
-	if (clock_type(c) != CLOCK_TYPE_E2E && clock_type(c) != CLOCK_TYPE_P2P) {
+	if (clock_type(c) == CLOCK_TYPE_BOUNDARY) {
 		if (compare(port_best, pair_best) != 0) {
 			pr_debug("State %s: PS_PASSIVE 2\n", port_log_name(r));
 			return PS_PASSIVE;
