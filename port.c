@@ -61,6 +61,8 @@ static int port_is_ieee8021as(struct port *p);
 static int port_is_uds(struct port *p);
 static void port_nrate_initialize(struct port *p);
 static void port_set_hw_path_delay(struct port *p);
+static void port_hsr_swap_clock_mode(struct port *p, enum port_state next);
+static bool port_hsr_prp_should_tx(struct port *p);
 
 static int announce_compare(struct ptp_message *m1, struct ptp_message *m2)
 {
@@ -1733,6 +1735,9 @@ int port_tx_announce(struct port *p, struct address *dst, uint16_t sequence_id)
 	if (!port_capable(p)) {
 		return 0;
 	}
+	if (!port_hsr_prp_should_tx(p)) {
+		return 0;
+	}
 	msg = msg_allocate();
 	if (!msg) {
 		return -1;
@@ -1808,6 +1813,9 @@ int port_tx_sync(struct port *p, struct address *dst, uint16_t sequence_id)
 		return 0;
 	}
 	if (port_sync_incapable(p)) {
+		return 0;
+	}
+	if (!port_hsr_prp_should_tx(p)) {
 		return 0;
 	}
 	msg = msg_allocate();
@@ -2156,6 +2164,7 @@ struct dataset *port_best_foreign(struct port *port)
 int process_announce(struct port *p, struct ptp_message *m)
 {
 	int result = 0;
+	struct port *q;
 
 	if (m->announce.stepsRemoved >= clock_max_steps_removed(p->clock)) {
 		return result;
@@ -2175,6 +2184,14 @@ int process_announce(struct port *p, struct ptp_message *m)
 	case PS_DISABLED:
 		break;
 	case PS_LISTENING:
+		result = add_foreign_master(p, m);
+		q = port_get_paired(p);
+		/* To avoid transitioning into MASTER for a brief second since that changes
+		 * the HW config to BC, breaking TC forwarding temporarily.
+		 */
+		if (q && (port_state(q) == PS_UNCALIBRATED || port_state(q) == PS_SLAVE))
+			port_set_announce_tmo(p);
+		break;
 	case PS_PRE_MASTER:
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
@@ -3668,6 +3685,7 @@ int port_state_update(struct port *p, enum fsm_event event, int mdiff)
 		p->state = next;
 		port_notify_event(p, NOTIFY_PORT_STATE);
 		p->unicast_state_dirty = true;
+		port_hsr_swap_clock_mode(p, next);
 		return 1;
 	}
 
@@ -3745,4 +3763,45 @@ static void port_set_hw_path_delay(struct port *p)
 	}
 #endif
 	return;
+}
+
+/* For HSR BC since passive/receiving BC needs to forward in HW like a TC */
+static void port_set_socket_clk_type(struct port *p, int clk_type)
+{
+	int header_offset;
+
+	if (p->fda.fd[FD_EVENT] < 0)
+		return;
+
+	header_offset = config_get_int(p->trp->cfg, interface_label(p->iface), "ptp_header_offset");
+	sk_timestamping_init(p->fda.fd[FD_EVENT], interface_label(p->iface), clk_type,
+			     p->timestamping, TRANS_IEEE_802_3, interface_get_vclock(p->iface),
+			     clock_domain_number(p->clock), p->delayMechanism, header_offset);
+}
+
+
+static void port_hsr_swap_clock_mode(struct port *p, enum port_state next) {
+	/* HSR ports need to be put in TC mode when in passive/receiving state to forward in HW */
+	if (clock_is_hsr(p->clock) && port_get_paired(p) && clock_type(p->clock) == CLOCK_TYPE_BOUNDARY) {
+		if (next == PS_MASTER || next == PS_GRAND_MASTER) {
+			pr_err("casan: reconfiguring %s for BC", port_log_name(p));
+			port_set_socket_clk_type(p, HWTSTAMP_CLOCK_TYPE_BOUNDARY_CLOCK);
+		} else if (next == PS_SLAVE || next == PS_PASSIVE || next == PS_PASSIVE_SLAVE) {
+			pr_err("casan: reconfiguring %s for TC", port_log_name(p));
+			port_set_socket_clk_type(p, HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK);
+		}
+	}
+}
+
+/* If port A is up and transmitting, don't use port B */
+static bool port_hsr_prp_should_tx(struct port *p)
+{
+	if (clock_is_hsr_or_prp(p->clock) && port_hsr_prp_b(p)) {
+		enum port_state paired_ps = port_state(port_get_paired(p));
+		if (paired_ps == PS_MASTER
+		    || paired_ps == PS_GRAND_MASTER
+		    || paired_ps == PS_PASSIVE)
+			return 0;
+	}
+	return 1;
 }
