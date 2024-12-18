@@ -327,7 +327,7 @@ static int ts2phc_auto_init_ports(struct ts2phc_private *priv)
 
 static void ts2phc_reconfigure(struct ts2phc_private *priv)
 {
-	struct ts2phc_clock *c, *ref_clk = NULL, *last = NULL;
+	struct ts2phc_clock *c, *ref_clk = NULL, *last = NULL, *passive_slave = NULL;
 	int num_ref_clocks = 0, num_target_clocks = 0;
 
 	pr_info("reconfiguring after port state change");
@@ -340,13 +340,15 @@ static void ts2phc_reconfigure(struct ts2phc_private *priv)
 		}
 
 		switch (c->state) {
+		case PS_PASSIVE_SLAVE:
+			passive_slave = c;
+			/* fallthrough */
 		case PS_FAULTY:
 		case PS_DISABLED:
 		case PS_LISTENING:
 		case PS_PRE_MASTER:
 		case PS_MASTER:
 		case PS_PASSIVE:
-		case PS_PASSIVE_SLAVE:
 			if (!c->is_target) {
 				pr_info("selecting %s for synchronization",
 					c->name);
@@ -370,7 +372,14 @@ static void ts2phc_reconfigure(struct ts2phc_private *priv)
 		}
 		last = c;
 	}
-	if (num_target_clocks >= 1 && !ref_clk) {
+
+	if (passive_slave && !ref_clk) {
+		/* Treat PASSIVE_SLAVE same as UNCALIBRATED, i.e. wait for clock to be ready */
+		num_ref_clocks++;
+		num_target_clocks--;
+	}
+
+	if (num_target_clocks >= 1 && !ref_clk && num_ref_clocks == 0) {
 		priv->ref_clock = last;
 		priv->ref_clock->is_target = false;
 		/* Reset to original state in next reconfiguration. */
