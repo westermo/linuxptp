@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <sched.h>
 
 #include "clockadj.h"
 #include "config.h"
@@ -677,6 +678,14 @@ int main(int argc, char *argv[])
 		ts2phc_cleanup(&priv);
 		return -1;
 	}
+
+	if (config_get_int(cfg, NULL, "set_process_priority")) {
+		/* Set daemon priority */
+		struct sched_param schedp = { .sched_priority = 49 };
+		if (sched_setscheduler(0, SCHED_FIFO, &schedp))
+			pr_err("Failed raising ts2phc priority: %m");
+	}
+
 	print_set_progname(progname);
 	print_set_tag(config_get_string(cfg, NULL, "message_tag"));
 	print_set_verbose(config_get_int(cfg, NULL, "verbose"));
