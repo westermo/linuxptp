@@ -46,6 +46,7 @@
 #include "tz.h"
 #include "uds.h"
 #include "util.h"
+#include "tcp_uds.h"
 
 #define N_CLOCK_PFD (N_POLLFD + 1) /* one extra per port, for the fault timer */
 #define POW2_41 ((double)(1ULL << 41))
@@ -154,6 +155,7 @@ struct clock {
 	double max_freq;
 	enum hsr_prp_mode hsr_prp_mode;
 	int tc_hw_fwd;
+	int tcp_uds_fd;
 };
 
 struct clock the_clock;
@@ -359,6 +361,7 @@ void clock_destroy(struct clock *c)
 	monitor_destroy(c->slave_event_monitor);
 	port_close(c->uds_rw_port);
 	port_close(c->uds_ro_port);
+	tcpuds_close(c->tcp_uds_fd);
 	free(c->pollfd);
 	if (c->clkid != CLOCK_REALTIME) {
 		phc_close(c->clkid);
@@ -1471,6 +1474,11 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 		pr_err("failed to open the UDS-RO port");
 		return NULL;
 	}
+	c->tcp_uds_fd = tcpuds_open(c->uds_rw_if);
+	if (!c->tcp_uds_fd) {
+		pr_err("failed to open the TCP UDS port");
+		return NULL;
+	}
 	clock_fda_changed(c);
 
 	c->slave_event_monitor = monitor_create(config, c->uds_rw_port);
@@ -1578,8 +1586,9 @@ static int clock_resize_pollfd(struct clock *c, int new_nports)
 	struct pollfd *new_pollfd;
 
 	/* Need to allocate two whole extra blocks of fds for UDS ports. */
+	/* +1 more for the TCP UDS socket */
 	new_pollfd = realloc(c->pollfd,
-			     (new_nports + 2) * N_CLOCK_PFD *
+			     ((new_nports + 2) * N_CLOCK_PFD + 1) *
 			     sizeof(struct pollfd));
 	if (!new_pollfd) {
 		return -1;
@@ -1617,6 +1626,11 @@ static void clock_check_pollfd(struct clock *c)
 	clock_fill_pollfd(dest, c->uds_rw_port);
 	dest += N_CLOCK_PFD;
 	clock_fill_pollfd(dest, c->uds_ro_port);
+	dest += N_CLOCK_PFD;
+
+	dest->fd = c->tcp_uds_fd;
+	dest->events = POLLIN|POLLPRI;
+
 	c->pollfd_valid = 1;
 }
 
@@ -1869,7 +1883,8 @@ int clock_poll(struct clock *c)
 	struct port *p;
 
 	clock_check_pollfd(c);
-	cnt = poll(c->pollfd, (c->nports + 2) * N_CLOCK_PFD, -1);
+	/* +1 for the TCP UDS socket */
+	cnt = poll(c->pollfd, (c->nports + 2) * N_CLOCK_PFD + 1, -1);
 	if (cnt < 0) {
 		if (EINTR == errno) {
 			return 0;
@@ -1941,6 +1956,11 @@ int clock_poll(struct clock *c)
 			event = port_event(c->uds_ro_port, i);
 			/* sde is not expected on the UDS-RO port */
 		}
+	}
+
+	cur += N_CLOCK_PFD;
+	if (cur->revents & (POLLIN|POLLPRI)) {
+		tcpuds_rcv(c, c->tcp_uds_fd);
 	}
 
 	if (c->sde) {
@@ -2420,4 +2440,46 @@ bool clock_is_hsr_or_prp(struct clock *c)
 bool clock_is_tc_hw_fwd(struct clock *c)
 {
 	return c->tc_hw_fwd;
+}
+
+struct ports_head *clock_get_ports(struct clock *c)
+{
+	return &c->ports;
+}
+
+int clock_tcpuds_current_ds(struct clock *c, int fd, const char *request)
+{
+	char buffer[TCPUDS_TX_BUF_SIZE];
+	int count;
+
+	snprintf(buffer, TCPUDS_TX_BUF_SIZE, "CURRENT\n");
+	send(fd, buffer, strlen(buffer), 0);
+
+	TCPUDS_MATCH(fd, buffer, "stepsRemoved", c->cur.stepsRemoved, PRIu16, request);
+	TCPUDS_MATCH(fd, buffer, "offsetFromMaster", c->cur.offsetFromMaster >> 16, PRId64, request);
+	TCPUDS_MATCH(fd, buffer, "meanPathDelay", c->cur.meanPathDelay >> 16, PRId64, request);
+
+	return 0;
+}
+
+int clock_tcpuds_default_ds(struct clock *c, int fd, const char *request)
+{
+	char buffer[TCPUDS_TX_BUF_SIZE];
+	int count;
+
+	snprintf(buffer, TCPUDS_TX_BUF_SIZE, "DEFAULT\n");
+	send(fd, buffer, strlen(buffer), 0);
+
+	TCPUDS_MATCH(fd, buffer, "twoStepFlag", c->dds.flags & DDS_TWO_STEP_FLAG, "d", request);
+	TCPUDS_MATCH(fd, buffer, "slaveOnly", c->dds.flags & DDS_SLAVE_ONLY, "d", request);
+	TCPUDS_MATCH(fd, buffer, "numberPorts", c->dds.numberPorts, PRIu16, request);
+	TCPUDS_MATCH(fd, buffer, "priority1", c->dds.priority1, PRIu8, request);
+	TCPUDS_MATCH(fd, buffer, "clockClass", c->dds.clockQuality.clockClass, PRIu8, request);
+	TCPUDS_MATCH(fd, buffer, "clockAccuracy", c->dds.clockQuality.clockAccuracy, PRIu8, request);
+	TCPUDS_MATCH(fd, buffer, "offsetScaledLogVariance", c->dds.clockQuality.offsetScaledLogVariance, PRIu16, request);
+	TCPUDS_MATCH(fd, buffer, "priority2", c->dds.priority2, PRIu8, request);
+	TCPUDS_MATCH(fd, buffer, "clockIdentity", cid2str(&c->dds.clockIdentity), "s", request);
+	TCPUDS_MATCH(fd, buffer, "domainNumber", c->dds.domainNumber, PRIu8, request);
+
+	return 0;
 }

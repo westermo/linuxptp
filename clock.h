@@ -442,5 +442,8 @@ bool clock_is_hsr(struct clock *c);
 bool clock_is_prp(struct clock *c);
 bool clock_is_hsr_or_prp(struct clock *c);
 bool clock_is_tc_hw_fwd(struct clock *c);
+struct ports_head *clock_get_ports(struct clock *c);
+int clock_tcpuds_current_ds(struct clock *c, int fd, const char *request);
+int clock_tcpuds_default_ds(struct clock *c, int fd, const char *request);
 
 #endif

@@ -31,6 +31,7 @@
 #include "notification.h"
 #include "pmc_common.h"
 #include "print.h"
+#include "tcp_uds.h"
 #include "tlv.h"
 #include "uds.h"
 #include "util.h"
@@ -853,6 +854,55 @@ static void usage(char *progname)
 		progname);
 }
 
+static int tcpuds_send_request(char *path, const char *arg)
+{
+	struct sockaddr_un sockaddr_un = { 0 };
+	char buffer[TCPUDS_RX_BUFFER_SIZE];
+	struct timeval timeout = { 1, 0};
+	int count;
+	int err;
+	int fd;
+
+	memset(buffer, 0, sizeof(buffer));
+
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0) {
+		fprintf(stderr, "%s: socket(): %s\n", __func__, strerror(errno));
+		return 0;
+	}
+
+	/* Set timeout to 1 second */
+	if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+		fprintf(stderr, "%s: setsockopt(): %s\n", __func__, strerror(errno));
+		close(fd);
+		return -1;
+	}
+
+	/* Construct the client address structure. */
+	sockaddr_un.sun_family = AF_UNIX;
+	// 108 comes from definition of sun_path
+	snprintf(sockaddr_un.sun_path, 108, "%s-tcp", path);
+
+	err = connect(fd, (struct sockaddr *) &sockaddr_un, sizeof(struct sockaddr_un));
+	if (err) {
+		fprintf(stderr, "%s: connect(): %s\n", __func__, strerror(errno));
+		close(fd);
+		return 0;
+	}
+
+	snprintf(buffer, TCPUDS_RX_BUFFER_SIZE-1, "%s\n", arg);
+	write(fd, buffer, strlen(buffer));
+	do {
+		count = read(fd, buffer, TCPUDS_RX_BUFFER_SIZE-1);
+		buffer[count] = '\0';
+		if (count > 0)
+			printf("%s", buffer);
+	} while (count > 0);
+
+	close(fd);
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	const char *iface_name = NULL;
@@ -867,6 +917,8 @@ int main(int argc, char *argv[])
 	struct config *cfg;
 #define N_FD 2
 	struct pollfd pollfd[N_FD];
+	char *tcpuds_arg = NULL;
+	int tcp_uds = 0;
 
 	handle_term_signals();
 
@@ -880,9 +932,13 @@ int main(int argc, char *argv[])
 	/* Process the command line arguments. */
 	progname = strrchr(argv[0], '/');
 	progname = progname ? 1+progname : argv[0];
-	while (EOF != (c = getopt_long(argc, argv, "246u""b:d:f:hi:s:t:vz",
+	while (EOF != (c = getopt_long(argc, argv, "246u""b:d:f:hi:s:t:vzT:",
 				       opts, &index))) {
 		switch (c) {
+		case 'T':
+			tcp_uds = 1;
+			tcpuds_arg = optarg;
+			break;
 		case 0:
 			if (config_parse_option(cfg, opts[index].name, optarg)) {
 				ret = -1;
@@ -970,6 +1026,10 @@ int main(int argc, char *argv[])
 	if (config && (c = config_read(config, cfg))) {
 		config_destroy(cfg);
 		return -1;
+	}
+
+	if (tcp_uds) {
+		return tcpuds_send_request(config_get_string(cfg, NULL, "uds_address"), tcpuds_arg);
 	}
 
 	transport_type = config_get_int(cfg, NULL, "network_transport");
