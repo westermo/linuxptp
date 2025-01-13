@@ -28,6 +28,7 @@
 #include <linux/sockios.h>
 #include <sys/ioctl.h>
 
+#include "net_tstamp_cpy.h"
 #include "bmc.h"
 #include "clock.h"
 #include "designated_fsm.h"
@@ -44,6 +45,7 @@
 #include "tlv.h"
 #include "tmv.h"
 #include "tsproc.h"
+#include "transport_private.h"
 #include "unicast_client.h"
 #include "unicast_service.h"
 #include "util.h"
@@ -62,7 +64,8 @@ static int port_is_uds(struct port *p);
 static void port_nrate_initialize(struct port *p);
 static void port_set_hw_path_delay(struct port *p);
 static void port_hsr_swap_clock_mode(struct port *p, enum port_state next);
-static bool port_hsr_prp_should_tx(struct port *p);
+static bool port_hsr_prp_should_tx(struct port *p, int msg_type);
+static void port_hsr_set_port_identity(struct port *p, struct ptp_message *msg);
 
 static int announce_compare(struct ptp_message *m1, struct ptp_message *m2)
 {
@@ -1735,7 +1738,7 @@ int port_tx_announce(struct port *p, struct address *dst, uint16_t sequence_id)
 	if (!port_capable(p)) {
 		return 0;
 	}
-	if (!port_hsr_prp_should_tx(p)) {
+	if (!port_hsr_prp_should_tx(p, ANNOUNCE)) {
 		return 0;
 	}
 	msg = msg_allocate();
@@ -1750,6 +1753,7 @@ int port_tx_announce(struct port *p, struct address *dst, uint16_t sequence_id)
 	msg->header.messageLength      = sizeof(struct announce_msg);
 	msg->header.domainNumber       = clock_domain_number(p->clock);
 	msg->header.sourcePortIdentity = p->portIdentity;
+	port_hsr_set_port_identity(p, msg);
 	msg->header.sequenceId         = sequence_id;
 	msg->header.logMessageInterval = p->logAnnounceInterval;
 
@@ -1815,7 +1819,7 @@ int port_tx_sync(struct port *p, struct address *dst, uint16_t sequence_id)
 	if (port_sync_incapable(p)) {
 		return 0;
 	}
-	if (!port_hsr_prp_should_tx(p)) {
+	if (!port_hsr_prp_should_tx(p, SYNC)) {
 		return 0;
 	}
 	msg = msg_allocate();
@@ -1835,6 +1839,7 @@ int port_tx_sync(struct port *p, struct address *dst, uint16_t sequence_id)
 	msg->header.messageLength      = sizeof(struct sync_msg);
 	msg->header.domainNumber       = clock_domain_number(p->clock);
 	msg->header.sourcePortIdentity = p->portIdentity;
+	port_hsr_set_port_identity(p, msg);
 	msg->header.sequenceId         = sequence_id;
 	msg->header.logMessageInterval = p->logSyncInterval;
 
@@ -2195,8 +2200,13 @@ int process_announce(struct port *p, struct ptp_message *m)
 	case PS_PRE_MASTER:
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
-	case PS_PASSIVE_SLAVE:
 		result = add_foreign_master(p, m);
+		break;
+	case PS_PASSIVE_SLAVE:
+		// TODO: Both? add_foreign and update_current?
+		result = add_foreign_master(p, m);
+		/* result |= update_current_master(p, m); */
+		port_set_announce_tmo(p);
 		break;
 	case PS_PASSIVE:
 	case PS_UNCALIBRATED:
@@ -2868,6 +2878,8 @@ void port_dispatch(struct port *p, enum fsm_event event, int mdiff)
 
 static void bc_dispatch(struct port *p, enum fsm_event event, int mdiff)
 {
+	enum port_state prior_state = p->state;
+
 	if (clock_slave_only(p->clock)) {
 		if (event == EV_RS_GRAND_MASTER) {
 			port_slave_priority_warning(p);
@@ -2891,6 +2903,15 @@ static void bc_dispatch(struct port *p, enum fsm_event event, int mdiff)
 			return;
 		}
 		clock_sync_interval(p->clock, p->log_sync_interval);
+	}
+
+	/* If coming from PASSIVE_SLAVE we want to quickly pick up the peer delay
+	 * from the port to avoid any calculations using the old peer delay.
+	 */
+	if (prior_state == PS_PASSIVE_SLAVE && port_state(p) == PS_UNCALIBRATED) {
+		struct tsproc *tsp = p->tsproc;
+		clock_peer_delay(p->clock, p->peer_delay,
+				 tsproc_get_t1(tsp), tsproc_get_t2(tsp), p->nrate.ratio);
 	}
 }
 
@@ -3024,6 +3045,14 @@ static enum fsm_event bc_event(struct port *p, int fd_index)
 		if (p->inhibit_announce) {
 			return EV_NONE;
 		}
+
+		struct port *q = port_get_paired(p);
+		if (q && q->state == PS_PASSIVE_SLAVE) {
+			/* Set other port to slave */
+			clock_hsr_prp_switchover(p->clock, p, q);
+			return EV_NONE;
+		}
+
 		return EV_ANNOUNCE_RECEIPT_TIMEOUT_EXPIRES;
 
 	case FD_DELAY_TIMER:
@@ -3784,24 +3813,44 @@ static void port_hsr_swap_clock_mode(struct port *p, enum port_state next) {
 	/* HSR ports need to be put in TC mode when in passive/receiving state to forward in HW */
 	if (clock_is_hsr(p->clock) && port_get_paired(p) && clock_type(p->clock) == CLOCK_TYPE_BOUNDARY) {
 		if (next == PS_MASTER || next == PS_GRAND_MASTER) {
-			pr_err("casan: reconfiguring %s for BC", port_log_name(p));
+			pr_notice("%s: Configuring for BC", port_log_name(p));
 			port_set_socket_clk_type(p, HWTSTAMP_CLOCK_TYPE_BOUNDARY_CLOCK);
 		} else if (next == PS_SLAVE || next == PS_PASSIVE || next == PS_PASSIVE_SLAVE) {
-			pr_err("casan: reconfiguring %s for TC", port_log_name(p));
+			pr_notice("%s: Configuring for TC", port_log_name(p));
 			port_set_socket_clk_type(p, HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK);
 		}
 	}
 }
 
 /* If port A is up and transmitting, don't use port B */
-static bool port_hsr_prp_should_tx(struct port *p)
+static bool port_hsr_prp_should_tx(struct port *p, int msg_type)
 {
 	if (clock_is_hsr_or_prp(p->clock) && port_hsr_prp_b(p)) {
 		enum port_state paired_ps = port_state(port_get_paired(p));
-		if (paired_ps == PS_MASTER
-		    || paired_ps == PS_GRAND_MASTER
-		    || paired_ps == PS_PASSIVE)
+		/* if (msg_type == SYNC) { */
+		if (paired_ps == PS_MASTER || paired_ps == PS_GRAND_MASTER)
 			return 0;
+		/* } else if (msg_type == ANNOUNCE) { */
+		/* 	if (paired_ps == PS_MASTER || paired_ps == PS_GRAND_MASTER) */
+		/* 		return 0; */
+		/* } */
 	}
 	return 1;
+}
+
+/* When using port B (A is down), set portIdentity to same as port A */
+static void port_hsr_set_port_identity(struct port *p, struct ptp_message *msg)
+{
+	struct port *port_a;
+
+	if (!clock_is_hsr_or_prp(p->clock) || port_hsr_prp_a(p))
+		return;
+
+	port_a = port_get_paired(p);
+	if (!port_a)
+		return; /* Not a paired port */
+
+	/* Ring injection requires setting the sourcePortIdentity to the TC clock and port */
+	msg->header.sourcePortIdentity.clockIdentity = port_a->portIdentity.clockIdentity;
+	msg->header.sourcePortIdentity.portNumber = port_a->portIdentity.portNumber;
 }

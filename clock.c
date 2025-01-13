@@ -2421,3 +2421,15 @@ bool clock_is_tc_hw_fwd(struct clock *c)
 {
 	return c->tc_hw_fwd;
 }
+
+void clock_hsr_prp_switchover(struct clock *c, struct port *p, struct port *q)
+{
+	pr_notice("%s: %s, Swapping to paired port %s",
+		  port_log_name(p),
+		  ev_str[EV_ANNOUNCE_RECEIPT_TIMEOUT_EXPIRES],
+		  port_log_name(q));
+
+	port_dispatch(p, EV_RS_PSLAVE, 0);
+	port_dispatch(q, EV_RS_SLAVE, 0);
+	handle_state_decision_event(c);
+}

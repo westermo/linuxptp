@@ -129,6 +129,53 @@ int dscmp(struct dataset *a, struct dataset *b)
 	return diff < 0 ? A_BETTER : B_BETTER;
 }
 
+/* Returns 0 if they are equal for all, except checking identity */
+static int dscmp_no_id(struct dataset *a, struct dataset *b)
+{
+	int diff;
+
+	if (a == b)
+		return 0;
+	if (a && !b)
+		return A_BETTER;
+	if (b && !a)
+		return B_BETTER;
+
+	diff = memcmp(&a->identity, &b->identity, sizeof(a->identity));
+
+	if (!diff)
+		return dscmp2(a, b);
+
+	if (a->priority1 < b->priority1)
+		return A_BETTER;
+	if (a->priority1 > b->priority1)
+		return B_BETTER;
+
+	if (a->quality.clockClass < b->quality.clockClass)
+		return A_BETTER;
+	if (a->quality.clockClass > b->quality.clockClass)
+		return B_BETTER;
+
+	if (a->quality.clockAccuracy < b->quality.clockAccuracy)
+		return A_BETTER;
+	if (a->quality.clockAccuracy > b->quality.clockAccuracy)
+		return B_BETTER;
+
+	if (a->quality.offsetScaledLogVariance <
+	    b->quality.offsetScaledLogVariance)
+		return A_BETTER;
+	if (a->quality.offsetScaledLogVariance >
+	    b->quality.offsetScaledLogVariance)
+		return B_BETTER;
+
+	if (a->priority2 < b->priority2)
+		return A_BETTER;
+	if (a->priority2 > b->priority2)
+		return B_BETTER;
+
+	return 0;
+}
+
 /* static char *compare_to_str(int res) */
 /* { */
 /* 	switch (res) { */
@@ -167,13 +214,19 @@ int dscmp(struct dataset *a, struct dataset *b)
 static enum port_state hsr_state_decision(struct clock *c, struct port *r,
 					  int (*compare)(struct dataset *a, struct dataset *b))
 {
-	struct dataset *clock_best, *port_best, *pair_best;
+	struct dataset *clock_ds, *clock_best, *port_best, *pair_best;
 	struct port *q;
 
+	clock_ds = clock_default_ds(c);
 	q = port_get_paired(r);
 	clock_best = clock_best_foreign(c);
 	port_best = port_best_foreign(r);
 	pair_best = port_best_foreign(q);
+
+	if (clock_type(c) == CLOCK_TYPE_BOUNDARY && compare(clock_ds, clock_best) >= 0) {
+		pr_debug("State %s: PS_GRAND_MASTER 1\n", port_log_name(r));
+		return PS_GRAND_MASTER;
+	}
 
 	/* print_ds("Clock", clock_best); */
 	/* print_ds(port_log_name(r), port_best); */

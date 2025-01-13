@@ -240,3 +240,13 @@ void tsproc_reset(struct tsproc *tsp, int full)
 		tsp->filtered_delay_valid = 0;
 	}
 }
+
+tmv_t tsproc_get_t1(struct tsproc *tsp)
+{
+	return tsp->t1;
+}
+
+tmv_t tsproc_get_t2(struct tsproc *tsp)
+{
+	return tsp->t1;
+}
