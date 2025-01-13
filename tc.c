@@ -250,9 +250,14 @@ int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 		return 1;
 	}
 	if (clock_is_tc_hw_fwd(q->clock)) {
-		return 1;
+		/* Management messages from UDS port must still
+		 * forward even if we are an offloaded TC.
+		 */
+		if ( ! (port_is_uds(q) && msg_type(m) == MANAGEMENT)) {
+			return 1;
+		}
 	}
-	if (!q->tc_spanning_tree && !clock_is_hsr(p->clock)) {
+	if (!q->tc_spanning_tree) {
 		return 0;
 	}
 	/* Forward frames in the wrong domain unconditionally. */
@@ -698,13 +703,15 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 	if (q->tc_spanning_tree && msg_type(msg) == ANNOUNCE) {
 		steps_removed = ntohs(msg->announce.stepsRemoved);
 		msg->announce.stepsRemoved = htons(1 + steps_removed);
-	} else if ((clock_is_hsr(q->clock) || clock_is_prp(q->clock)) && msg_type(msg) == MANAGEMENT) {
-		/* HSR forwards in HW inside the ring, causing a huge
-		 * amount of packages since all requests and responses
-		 * are basically broadcast. Let's not forward them for
-		 * now.
+	} else if (port_is_uds(q) && msg_type(msg) == MANAGEMENT) {
+		/* Management messages from local UDS shouldn't be
+		 * forwarded if boundaryHops is 0. Else, decrement it
+		 * and forward. This should be similar behavior to BC
+		 * from the users perspective.
 		 */
-		return 0;
+		if (msg->management.boundaryHops == 0)
+			return 0;
+		msg->management.boundaryHops--;
 	}
 
 	for (p = clock_first_port(q->clock); p; p = LIST_NEXT(p, list)) {
