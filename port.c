@@ -60,7 +60,6 @@ enum syfu_event {
 };
 
 static int port_is_ieee8021as(struct port *p);
-static int port_is_uds(struct port *p);
 static void port_nrate_initialize(struct port *p);
 static void port_set_hw_path_delay(struct port *p);
 static void port_hsr_swap_clock_mode(struct port *p, enum port_state next);
@@ -862,7 +861,7 @@ static int port_is_ieee8021as(struct port *p)
 	return p->follow_up_info ? 1 : 0;
 }
 
-static int port_is_uds(struct port *p)
+int port_is_uds(struct port *p)
 {
 	return transport_type(p->trp) == TRANS_UDS;
 }

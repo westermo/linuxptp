@@ -250,7 +250,12 @@ int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 		return 1;
 	}
 	if (clock_is_tc_hw_fwd(q->clock)) {
-		return 1;
+		/* Management messages from UDS port must still
+		 * forward even if we are an offloaded TC.
+		 */
+		if ( ! (port_is_uds(q) && msg_type(m) == MANAGEMENT)) {
+			return 1;
+		}
 	}
 	if (!q->tc_spanning_tree && !clock_is_hsr(p->clock)) {
 		return 0;
@@ -705,6 +710,15 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 		 * now.
 		 */
 		return 0;
+	} else if (port_is_uds(q) && msg_type(msg) == MANAGEMENT) {
+		/* Management messages from local UDS shouldn't be
+		 * forwarded if boundaryHops is 0. Else, decrement it
+		 * and forward. This should be similar behavior to BC
+		 * from the users perspective.
+		 */
+		if (msg->management.boundaryHops == 0)
+			return 0;
+		msg->management.boundaryHops--;
 	}
 
 	for (p = clock_first_port(q->clock); p; p = LIST_NEXT(p, list)) {
