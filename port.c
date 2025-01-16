@@ -19,6 +19,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <malloc.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -32,8 +33,10 @@
 #include "clock.h"
 #include "designated_fsm.h"
 #include "filter.h"
+#include "interface.h"
 #include "missing.h"
 #include "msg.h"
+#include "pdt.h"
 #include "phc.h"
 #include "port.h"
 #include "port_private.h"
@@ -61,7 +64,7 @@ static int port_is_ieee8021as(struct port *p);
 static void port_nrate_initialize(struct port *p);
 static void port_set_hw_path_delay(struct port *p);
 
-static int announce_compare(struct ptp_message *m1, struct ptp_message *m2)
+int announce_compare(struct ptp_message *m1, struct ptp_message *m2)
 {
 	struct announce_msg *a = &m1->announce, *b = &m2->announce;
 	int len =
@@ -74,7 +77,7 @@ static int announce_compare(struct ptp_message *m1, struct ptp_message *m2)
 	return memcmp(&a->grandmasterPriority1, &b->grandmasterPriority1, len);
 }
 
-static void announce_to_dataset(struct ptp_message *m, struct port *p,
+void announce_to_dataset(struct ptp_message *m, struct port *p,
 				struct dataset *out)
 {
 	struct announce_msg *a = &m->announce;
@@ -101,7 +104,7 @@ int clear_fault_asap(struct fault_interval *faint)
 	return 0;
 }
 
-static int check_source_identity(struct port *p, struct ptp_message *m)
+int check_source_identity(struct port *p, struct ptp_message *m)
 {
 	struct PortIdentity master;
 
@@ -156,7 +159,7 @@ static int msg_current(struct ptp_message *m, struct timespec now)
 	return t2 - t1 < tmo;
 }
 
-static int msg_source_equal(struct ptp_message *m1, struct foreign_clock *fc)
+int msg_source_equal(struct ptp_message *m1, struct foreign_clock *fc)
 {
 	struct PortIdentity *id1, *id2;
 
@@ -313,7 +316,7 @@ void fc_clear(struct foreign_clock *fc)
 	}
 }
 
-static void fc_prune(struct foreign_clock *fc)
+void fc_prune(struct foreign_clock *fc)
 {
 	struct timespec now;
 	struct ptp_message *m;
@@ -1831,6 +1834,7 @@ int port_is_enabled(struct port *p)
 	case PS_PASSIVE:
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
+	case PS_PASSIVE_SLAVE:
 		break;
 	}
 	return 1;
@@ -2106,6 +2110,8 @@ int process_announce(struct port *p, struct ptp_message *m)
 	case PS_SLAVE:
 		result = update_current_master(p, m);
 		break;
+	case PS_PASSIVE_SLAVE:
+		break;
 	}
 	return result;
 }
@@ -2240,6 +2246,7 @@ void process_follow_up(struct port *p, struct ptp_message *m)
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
 	case PS_PASSIVE:
+	case PS_PASSIVE_SLAVE:
 		return;
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
@@ -2563,6 +2570,7 @@ void process_sync(struct port *p, struct ptp_message *m)
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
 	case PS_PASSIVE:
+	case PS_PASSIVE_SLAVE:
 		return;
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
@@ -2706,6 +2714,8 @@ static void port_e2e_transition(struct port *p, enum port_state next)
 		port_set_announce_tmo(p);
 		port_set_delay_tmo(p);
 		break;
+	case PS_PASSIVE_SLAVE:
+		break;
 	};
 }
 
@@ -2749,6 +2759,8 @@ static void port_p2p_transition(struct port *p, enum port_state next)
 		/* fall through */
 	case PS_SLAVE:
 		port_set_announce_tmo(p);
+		break;
+	case PS_PASSIVE_SLAVE:
 		break;
 	};
 }
@@ -3501,8 +3513,8 @@ struct port *port_open(const char *phc_device,
 		}
 	}
 
-	p->hsr_prp_port_a = config_get_int(cfg, p->name, "hsr_prp_port_a");
-	p->hsr_prp_port_b = config_get_int(cfg, p->name, "hsr_prp_port_b");
+	/* p->hsr_prp_port_a = config_get_int(cfg, p->name, "hsr_prp_port_a"); */
+	/* p->hsr_prp_port_b = config_get_int(cfg, p->name, "hsr_prp_port_b"); */
 
 	return p;
 
@@ -3589,28 +3601,7 @@ void port_update_unicast_state(struct port *p)
 	}
 }
 
-bool port_hsr_prp_a(struct port *p)
-{
-	return p->hsr_prp_port_a;
-}
-
-bool port_hsr_prp_b(struct port *p)
-{
-	return p->hsr_prp_port_b;
-}
-
-void port_set_paired(struct port *p, struct port *q)
-{
-	p->paired_port = q;
-	q->paired_port = p;
-}
-
-struct port *port_get_paired(struct port *p)
-{
-	return p->paired_port;
-}
-
-static void port_set_hw_path_delay(struct port *p)
+void port_write_hw_path_delay(const char *ifname, int ev_fd, Integer64 delay_ns)
 {
 #ifdef HAS_ETHTOOL_MEAN_PATH_DELAY
 	struct {
@@ -3618,10 +3609,30 @@ static void port_set_hw_path_delay(struct port *p)
 		__s64 mean_path_delay;
 	} cont;
 	struct ifreq ifr;
-	Integer64 value;
 	int err;
 
-	if (!clock_is_tc_hw_fwd(p->clock) && (!clock_is_hsr(p->clock) || !port_get_paired(p)))
+	cont.fld.cmd = ETHTOOL_PHY_STUNABLE;
+	cont.fld.id = ETHTOOL_PHY_MEAN_PATH_DELAY;
+	cont.fld.type_id = ETHTOOL_TUNABLE_S64;
+	cont.fld.len = 8;
+	cont.mean_path_delay = delay_ns;
+
+	ifr.ifr_data = (char*) &cont.fld;
+	strncpy(ifr.ifr_name, ifname, ETH_ALEN);
+
+	err = ioctl(ev_fd, SIOCETHTOOL, &ifr);
+	if (err < 0) {
+		pr_err("Cannot Set PHY Mean Path Delay for %s: %m", ifname);
+	}
+#endif
+	return;
+}
+
+static void port_set_hw_path_delay(struct port *p)
+{
+	Integer64 value;
+
+	if (!clock_is_tc_hw_fwd(p->clock)) // && (!clock_is_hsr(p->clock) || !port_get_paired(p)))
 		return;
 
 	/* Include ingr/egr latency for HW forwarded packets.
@@ -3631,20 +3642,12 @@ static void port_set_hw_path_delay(struct port *p)
 		+ (p->rx_timestamp_offset >> 16)
 		+ (p->tx_timestamp_offset >> 16);
 
-	cont.fld.cmd = ETHTOOL_PHY_STUNABLE;
-	cont.fld.id = ETHTOOL_PHY_MEAN_PATH_DELAY;
-	cont.fld.type_id = ETHTOOL_TUNABLE_S64;
-	cont.fld.len = 8;
-	cont.mean_path_delay = value;
-
-	ifr.ifr_data = (char*) &cont.fld;
-	strncpy(ifr.ifr_name, p->name, ETH_ALEN);
-
 	/* Just use the event file descriptor */
-	err = ioctl(p->fda.fd[FD_EVENT], SIOCETHTOOL, &ifr);
-	if (err < 0) {
-		perror("Cannot Set PHY Mean Path Delay");
-	}
-#endif
-	return;
+	port_write_hw_path_delay(p->name, p->fda.fd[FD_EVENT], value);
 }
+
+int port_is_red(struct port *p)
+{
+	return p->red_a && p->red_b;
+}
+

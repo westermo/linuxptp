@@ -31,6 +31,7 @@ enum port_state {
 	PS_PASSIVE,
 	PS_UNCALIBRATED,
 	PS_SLAVE,
+	PS_PASSIVE_SLAVE, /* IEC 62439-3 specifices that this has the value 10 */
 	PS_GRAND_MASTER, /*non-standard extension*/
 };
 

@@ -214,6 +214,8 @@ enum port_state ptp_fsm(enum port_state state, enum fsm_event event, int mdiff)
 			break;
 		}
 		break;
+	case PS_PASSIVE_SLAVE:
+		break;
 	}
 
 	return next;

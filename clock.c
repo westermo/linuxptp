@@ -45,6 +45,7 @@
 #include "tz.h"
 #include "uds.h"
 #include "util.h"
+#include "red.h"
 
 #define N_CLOCK_PFD (N_POLLFD + 1) /* one extra per port, for the fault timer */
 #define POW2_41 ((double)(1ULL << 41))
@@ -1067,6 +1068,35 @@ static int clock_add_port(struct clock *c, const char *phc_device,
 	return 0;
 }
 
+static int clock_add_red_port(struct clock *c, const char *phc_device,
+			      int phc_index, enum timestamp_type timestamping,
+			      struct interface *iface_a, struct interface *iface_b)
+{
+	struct port *p, *piter, *lastp = NULL;
+
+	if (clock_resize_pollfd(c, c->nports + 2)) {
+		return -1;
+	}
+	p = red_open(phc_device, phc_index, timestamping,
+		      ++c->last_port_number, iface_a, iface_b, c);
+	if (!p) {
+		/* No need to shrink pollfd */
+		return -1;
+	}
+	LIST_FOREACH(piter, &c->ports, list) {
+		lastp = piter;
+	}
+	if (lastp) {
+		LIST_INSERT_AFTER(lastp, p, list);
+	} else {
+		LIST_INSERT_HEAD(&c->ports, p, list);
+	}
+	c->nports++;
+	clock_fda_changed(c);
+
+	return 0;
+}
+
 static void clock_remove_port(struct clock *c, struct port *p)
 {
 	/* Do not call clock_resize_pollfd, it's pointless to shrink
@@ -1077,7 +1107,10 @@ static void clock_remove_port(struct clock *c, struct port *p)
 	LIST_REMOVE(p, list);
 	c->nports--;
 	clock_fda_changed(c);
-	port_close(p);
+	if (port_is_red(p))
+		red_close(p);
+	else
+		port_close(p);
 }
 
 int clock_required_modes(struct clock *c)
@@ -1123,8 +1156,6 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 	unsigned char oui[OUI_LEN];
 	struct interface *iface;
 	struct timespec ts;
-	struct port *port_a = NULL;
-	struct port *port_b = NULL;
 
 	clock_gettime(CLOCK_REALTIME, &ts);
 	srandom(ts.tv_sec ^ ts.tv_nsec);
@@ -1461,10 +1492,28 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 		return NULL;
 	}
 
+	struct interface *iface_a = NULL;
+	struct interface *iface_b = NULL;
 	/* Create the ports. */
 	STAILQ_FOREACH(iface, &config->interfaces, list) {
+		if (config_get_int(config, interface_name(iface), "hsr_prp_port_a")) {
+			iface_a = iface;
+			continue;
+		}
+		if (config_get_int(config, interface_name(iface), "hsr_prp_port_b")) {
+			iface_b = iface;
+			continue;
+		}
+
 		if (clock_add_port(c, phc_device, phc_index, timestamping, iface)) {
 			pr_err("failed to open port %s", interface_name(iface));
+			return NULL;
+		}
+	}
+
+	if (iface_a && iface_b) {
+		if (clock_add_red_port(c, phc_device, phc_index, timestamping, iface_a, iface_b)) {
+			pr_err("failed to open port RED port");
 			return NULL;
 		}
 	}
@@ -1473,16 +1522,6 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 
 	c->hsr_prp_mode = config_get_int(config, NULL, "hsr_prp_mode");
 	c->tc_hw_fwd = config_get_int(config, NULL, "tc_hw_fwd");
-
-	if (c->hsr_prp_mode != HSR_PRP_MODE_NONE) {
-		LIST_FOREACH(p, &c->ports, list) {
-			if (port_hsr_prp_a(p))
-				port_a = p;
-			else if (port_hsr_prp_b(p))
-				port_b = p;
-		}
-		port_set_paired(port_a, port_b);
-	}
 
 	LIST_FOREACH(p, &c->ports, list) {
 		port_dispatch(p, EV_INITIALIZE, 0);
@@ -1767,6 +1806,7 @@ int clock_do_manage(struct clock *c, struct port *p, struct ptp_message *msg)
 	default:
 		answers = 0;
 		LIST_FOREACH(piter, &c->ports, list) {
+			// TODO: Add separate port_manage for RED
 			res = port_manage(piter, p, msg);
 			if (res < 0)
 				return changed;
@@ -2262,7 +2302,10 @@ static void handle_state_decision_event(struct clock *c)
 	int fresh_best = 0;
 
 	LIST_FOREACH(piter, &c->ports, list) {
-		fc = port_compute_best(piter);
+		if (port_is_red(piter))
+			fc = red_compute_best(piter);
+		else
+			fc = port_compute_best(piter);
 		if (!fc)
 			continue;
 		if (!best || c->dscmp(&fc->dataset, &best->dataset) > 0)
@@ -2380,4 +2423,14 @@ bool clock_tc_syntonize(struct clock *c)
 bool clock_is_tc_hw_fwd(struct clock *c)
 {
 	return c->tc_hw_fwd;
+}
+
+bool clock_is_hsr(struct clock *c)
+{
+	return c->hsr_prp_mode == HSR_PRP_MODE_HSR;
+}
+
+bool clock_is_prp(struct clock *c)
+{
+	return c->hsr_prp_mode == HSR_PRP_MODE_PRP;
 }

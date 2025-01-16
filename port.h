@@ -366,9 +366,18 @@ void port_update_unicast_state(struct port *p);
 
 int port_is_uds(struct port *p);
 
-bool port_hsr_prp_a(struct port *p);
-bool port_hsr_prp_b(struct port *p);
-void port_set_paired(struct port *p, struct port *partner);
-struct port *port_get_paired(struct port *p);
+int check_source_identity(struct port *p, struct ptp_message *m);
+
+void announce_to_dataset(struct ptp_message *m, struct port *p,
+				struct dataset *out);
+
+int announce_compare(struct ptp_message *m1, struct ptp_message *m2);
+
+int msg_source_equal(struct ptp_message *m1, struct foreign_clock *fc);
+
+void fc_prune(struct foreign_clock *fc);
+
+void port_write_hw_path_delay(const char *ifname, int ev_fd, Integer64 delay_ns);
+int port_is_red(struct port *p);
 
 #endif

@@ -20,7 +20,7 @@
 #ifndef HAVE_FD_H
 #define HAVE_FD_H
 
-#define N_TIMER_FDS 8
+#define N_TIMER_FDS 9
 
 /*
  * The order matters here.  The DELAY timer must appear before the
@@ -39,7 +39,11 @@ enum {
 	FD_SYNC_TX_TIMER,
 	FD_UNICAST_REQ_TIMER,
 	FD_UNICAST_SRV_TIMER,
+	FD_ANNOUNCE_TIMER_B, // RED port B ???
 	FD_RTNL,
+	FD_EVENT_B,   /* RED port B */
+	FD_GENERAL_B, /* RED port B */
+	FD_RTNL_B,    /* RED port B */
 	N_POLLFD,
 };
 
