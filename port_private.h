@@ -26,6 +26,7 @@
 #include "fsm.h"
 #include "monitor.h"
 #include "msg.h"
+#include "net_tstamp_cpy.h"
 #include "power_profile.h"
 #include "tmv.h"
 #include "util.h"
@@ -69,6 +70,14 @@ struct onestep_conversion_info {
 	UInteger32 reserved2;
 	UInteger8 msg_type;
 	bool valid;
+};
+
+struct redundant_bc_info {
+	/* Using clock_gettime since the Announce we compare it to won't have a PHC timestamp */
+	struct timespec last_sync;
+	struct PortIdentity sync_pid;
+	struct timespec last_anno;
+	struct PortIdentity anno_pid;
 };
 
 struct port {
@@ -177,10 +186,16 @@ struct port {
 	struct monitor *slave_event_monitor;
 	bool unicast_state_dirty;
 	int dummy_pdelay_resp_fup;
-        bool hsr_prp_port_a;
-        bool hsr_prp_port_b;
-	struct port *paired_port;
 	struct onestep_conversion_info onestep_info;
+	struct red_port *red_a;
+	struct red_port *red_b;
+	struct red_port *best_red; /* Points to red_a or red_b */
+	enum hwtstamp_clk_types curr_clktype;
+	int egress_vlan_tagged;
+	int egress_vlan_id;
+	int egress_vlan_prio;
+	int errorCounter;
+	struct redundant_bc_info redundant_bc_info;
 };
 
 #define portnum(p) (p->portIdentity.portNumber)

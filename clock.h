@@ -438,4 +438,8 @@ double clock_rate_ratio(struct clock *c);
 
 bool clock_tc_syntonize(struct clock *c);
 bool clock_is_tc_hw_fwd(struct clock *c);
+bool clock_is_hsr(struct clock *c);
+bool clock_is_prp(struct clock *c);
+bool clock_is_hsr_or_prp(struct clock *c);
+int clock_switch_phc_keep_servo(struct clock *c, int phc_index);
 #endif

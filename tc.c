@@ -89,6 +89,7 @@ static int tc_blocked(struct port *q, struct port *p, struct ptp_message *m)
 	case PS_LISTENING:
 	case PS_PRE_MASTER:
 	case PS_PASSIVE:
+	case PS_PASSIVE_SLAVE:
 		return 1;
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
@@ -116,6 +117,7 @@ egress:
 	case PS_LISTENING:
 	case PS_PRE_MASTER:
 	case PS_PASSIVE:
+	case PS_PASSIVE_SLAVE:
 		return 1;
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
@@ -188,6 +190,7 @@ static void tc_complete_response(struct port *q, struct port *p,
 	cnt = transport_send(p->trp, &p->fda, TRANS_GENERAL, resp);
 	if (cnt <= 0) {
 		pr_err("tc failed to forward response on %s", p->log_name);
+		p->errorCounter++;
 		port_dispatch(p, EV_FAULT_DETECTED, 0);
 	}
 	/* Restore original correction value for next egress port. */
@@ -249,6 +252,7 @@ static void tc_complete_syfup(struct port *q, struct port *p,
 	cnt = transport_send(p->trp, &p->fda, TRANS_GENERAL, fup);
 	if (cnt <= 0) {
 		pr_err("tc failed to forward follow up on %s", p->log_name);
+		p->errorCounter++;
 		port_dispatch(p, EV_FAULT_DETECTED, 0);
 	}
 	/* Restore original correction value for next egress port. */
@@ -321,6 +325,7 @@ static int tc_fwd_event(struct port *q, struct ptp_message *msg)
 		if (cnt <= 0) {
 			pr_err("failed to forward event from %s to %s",
 				q->log_name, p->log_name);
+			p->errorCounter++;
 			port_dispatch(p, EV_FAULT_DETECTED, 0);
 		}
 
@@ -508,6 +513,7 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 		if (cnt <= 0) {
 			pr_err("tc failed to forward message on %s",
 			       p->log_name);
+			p->errorCounter++;
 			port_dispatch(p, EV_FAULT_DETECTED, 0);
 		}
 	}
@@ -597,6 +603,7 @@ int tc_fwd_response(struct port *q, struct ptp_message *msg)
 		}
 		if (p->timestamping == TS_ONESTEP) {
 			if ((transport_send(p->trp, &p->fda, TRANS_GENERAL, msg)) <= 0) {
+				p->errorCounter++;
 				pr_err("tc failed to forward response on port %d", portnum(p));
 				port_dispatch(p, EV_FAULT_DETECTED, 0);
 			}

@@ -71,6 +71,8 @@ void e2e_dispatch(struct port *p, enum fsm_event event, int mdiff)
 	case PS_SLAVE:
 		port_set_announce_tmo(p);
 		break;
+	case PS_PASSIVE_SLAVE:
+		break;
 	};
 
 	if (clock_tc_syntonize(p->clock) && p->jbod && p->state == PS_UNCALIBRATED && p->phc_index >= 0 ) {

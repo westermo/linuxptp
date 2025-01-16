@@ -72,4 +72,6 @@ int dscmp2(struct dataset *a, struct dataset *b);
  */
 int telecom_dscmp(struct dataset *a, struct dataset *b);
 
+int dscmp_no_id(struct dataset *a, struct dataset *b);
+
 #endif

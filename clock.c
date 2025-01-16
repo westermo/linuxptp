@@ -45,6 +45,7 @@
 #include "tz.h"
 #include "uds.h"
 #include "util.h"
+#include "red.h"
 
 #define N_CLOCK_PFD (N_POLLFD + 1) /* one extra per port, for the fault timer */
 #define POW2_41 ((double)(1ULL << 41))
@@ -455,8 +456,13 @@ static int clock_management_fill_response(struct clock *c, struct port *p,
 		datalen = 1 + text->length;
 		break;
 	case MID_DEFAULT_DATA_SET:
-		memcpy(tlv->data, &c->dds, sizeof(c->dds));
-		datalen = sizeof(c->dds);
+		if (clock_is_hsr_or_prp(c)) {
+			datalen = sizeof(c->dds);
+			memcpy(tlv->data, &c->dds, datalen);
+		} else {
+			datalen = sizeof(c->dds) - sizeof(struct iec62439_defaultDS);
+			memcpy(tlv->data, &c->dds, datalen);
+		}
 		break;
 	case MID_CURRENT_DATA_SET:
 		memcpy(tlv->data, &c->cur, sizeof(c->cur));
@@ -549,7 +555,14 @@ static int clock_management_fill_response(struct clock *c, struct port *p,
 		memcpy(&tcds->numberPorts, &c->dds.numberPorts, sizeof(tcds->numberPorts));
 		tcds->delayMechanism = port_delay_mechanism(clock_first_port(c));
 		memcpy(&tcds->primaryDomain, &c->dds.domainNumber, sizeof(tcds->primaryDomain));
-		datalen = sizeof(struct transparentClockDefaultDS);
+
+		if (clock_is_hsr_or_prp(c)) {
+			tcds->iec62439_ds.profileSet = c->dds.iec62439_ds.profileSet;
+			tcds->iec62439_ds.timeInaccuracy = c->dds.iec62439_ds.timeInaccuracy;
+			datalen = sizeof(struct transparentClockDefaultDS);
+		} else {
+			datalen = sizeof(struct transparentClockDefaultDS) - sizeof(struct iec62439_transparent_defaultDS);
+		}
 		break;
 	case MID_TIME_STATUS_NP:
 		tsn = (struct time_status_np *) tlv->data;
@@ -815,7 +828,6 @@ static enum servo_state clock_no_adjust(struct clock *c, tmv_t ingress,
 	if (c->tc_syntonize) {
 		// TODO: Use sample-servo with freq and c->freq? They are not timestamps so may need adjusted servo
 		tmp = c->freq - freq;
-		/* pr_info("casan: Prev freq %lf. New freq %lf", c->freq, tmp); */
 		if (tmp > c->max_freq)
 			tmp = c->max_freq;
 		else if (tmp < -c->max_freq)
@@ -1067,6 +1079,37 @@ static int clock_add_port(struct clock *c, const char *phc_device,
 	return 0;
 }
 
+static int clock_add_red_port(struct clock *c, const char *phc_device,
+			      int phc_index, enum timestamp_type timestamping,
+			      struct interface *iface_a, struct interface *iface_b)
+{
+	struct port *p, *piter, *lastp = NULL;
+
+	if (clock_resize_pollfd(c, c->nports + 2)) {
+		return -1;
+	}
+	p = red_open(phc_device, phc_index, timestamping,
+		      ++c->last_port_number, iface_a, iface_b, c);
+	c->last_port_number++; /* Increment again since RED consumes two ports */
+	if (!p) {
+		/* No need to shrink pollfd */
+		return -1;
+	}
+	LIST_FOREACH(piter, &c->ports, list) {
+		lastp = piter;
+	}
+	if (lastp) {
+		LIST_INSERT_AFTER(lastp, p, list);
+	} else {
+		LIST_INSERT_HEAD(&c->ports, p, list);
+	}
+	/* Even though RED has two ports, we cannot increment this since that affects other things */
+	c->nports++;
+	clock_fda_changed(c);
+
+	return 0;
+}
+
 static void clock_remove_port(struct clock *c, struct port *p)
 {
 	/* Do not call clock_resize_pollfd, it's pointless to shrink
@@ -1077,7 +1120,10 @@ static void clock_remove_port(struct clock *c, struct port *p)
 	LIST_REMOVE(p, list);
 	c->nports--;
 	clock_fda_changed(c);
-	port_close(p);
+	if (port_is_red(p))
+		red_close(p);
+	else
+		port_close(p);
 }
 
 int clock_required_modes(struct clock *c)
@@ -1123,8 +1169,6 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 	unsigned char oui[OUI_LEN];
 	struct interface *iface;
 	struct timespec ts;
-	struct port *port_a = NULL;
-	struct port *port_b = NULL;
 
 	clock_gettime(CLOCK_REALTIME, &ts);
 	srandom(ts.tv_sec ^ ts.tv_nsec);
@@ -1151,6 +1195,10 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 		config_get_int(config, NULL, "clockAccuracy");
 	c->dds.clockQuality.offsetScaledLogVariance =
 		config_get_int(config, NULL, "offsetScaledLogVariance");
+
+	c->dds.iec62439_ds.offsetFromMasterLim = 50;
+	c->dds.iec62439_ds.profileSet = PROFILE_SET_L2P2P;
+	c->dds.iec62439_ds.timeInaccuracy = 50 * (1 << 16);
 
 	c->desc.productDescription.max_symbols = 64;
 	c->desc.revisionData.max_symbols = 32;
@@ -1461,8 +1509,19 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 		return NULL;
 	}
 
+	struct interface *iface_a = NULL;
+	struct interface *iface_b = NULL;
 	/* Create the ports. */
 	STAILQ_FOREACH(iface, &config->interfaces, list) {
+		if (config_get_int(config, interface_name(iface), "hsr_prp_port_a")) {
+			iface_a = iface;
+			continue;
+		}
+		if (config_get_int(config, interface_name(iface), "hsr_prp_port_b")) {
+			iface_b = iface;
+			continue;
+		}
+
 		if (clock_add_port(c, phc_device, phc_index, timestamping, iface)) {
 			pr_err("failed to open port %s", interface_name(iface));
 			return NULL;
@@ -1471,18 +1530,16 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 
 	c->dds.numberPorts = c->nports;
 
+	if (iface_a && iface_b) {
+		if (clock_add_red_port(c, phc_device, phc_index, timestamping, iface_a, iface_b)) {
+			pr_err("failed to open port RED port");
+			return NULL;
+		}
+		c->dds.numberPorts += 2;
+	}
+
 	c->hsr_prp_mode = config_get_int(config, NULL, "hsr_prp_mode");
 	c->tc_hw_fwd = config_get_int(config, NULL, "tc_hw_fwd");
-
-	if (c->hsr_prp_mode != HSR_PRP_MODE_NONE) {
-		LIST_FOREACH(p, &c->ports, list) {
-			if (port_hsr_prp_a(p))
-				port_a = p;
-			else if (port_hsr_prp_b(p))
-				port_b = p;
-		}
-		port_set_paired(port_a, port_b);
-	}
 
 	LIST_FOREACH(p, &c->ports, list) {
 		port_dispatch(p, EV_INITIALIZE, 0);
@@ -2262,7 +2319,10 @@ static void handle_state_decision_event(struct clock *c)
 	int fresh_best = 0;
 
 	LIST_FOREACH(piter, &c->ports, list) {
-		fc = port_compute_best(piter);
+		if (port_is_red(piter))
+			fc = red_compute_best(piter);
+		else
+			fc = port_compute_best(piter);
 		if (!fc)
 			continue;
 		if (!best || c->dscmp(&fc->dataset, &best->dataset) > 0)
@@ -2380,4 +2440,38 @@ bool clock_tc_syntonize(struct clock *c)
 bool clock_is_tc_hw_fwd(struct clock *c)
 {
 	return c->tc_hw_fwd;
+}
+
+bool clock_is_hsr(struct clock *c)
+{
+	return c->hsr_prp_mode == HSR_PRP_MODE_HSR;
+}
+
+bool clock_is_prp(struct clock *c)
+{
+	return c->hsr_prp_mode == HSR_PRP_MODE_PRP;
+}
+
+bool clock_is_hsr_or_prp(struct clock *c)
+{
+	return clock_is_hsr(c) || clock_is_prp(c);
+}
+
+int clock_switch_phc_keep_servo(struct clock *c, int phc_index)
+{
+	clockid_t clkid;
+	char phc[32];
+
+	snprintf(phc, sizeof(phc), "/dev/ptp%d", phc_index);
+	clkid = phc_open(phc);
+	if (clkid == CLOCK_INVALID) {
+		pr_err("Switching PHC, failed to open %s: %m", phc);
+		return -1;
+	}
+	phc_close(c->clkid);
+	c->clkid = clkid;
+
+	pr_info("Switched to /dev/ptp%d as PTP clock", phc_index);
+
+	return 0;
 }
