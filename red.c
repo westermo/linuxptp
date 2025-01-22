@@ -30,6 +30,7 @@
 #include <linux/sockios.h>
 #include <sys/ioctl.h>
 
+#include "bmc.h"
 #include "clock.h"
 #include "fd.h"
 #include "foreign.h"
@@ -37,6 +38,7 @@
 #include "interface.h"
 #include "msg.h"
 #include "port_private.h"
+#include "tmv.h"
 #include "transport.h"
 #include "util.h"
 #include "print.h"
@@ -47,6 +49,7 @@
 static void red_port_p2p_transition(struct red_port *rp, enum port_state next);
 static enum fsm_event red_switchover(struct red_port *from, enum port_state from_next);
 static void red_dispatch_ports(struct port *p);
+static void red_port_notify_event(struct red_port *rp, enum notification event);
 
 static bool red_is_a(struct red_port *rp)
 {
@@ -185,16 +188,18 @@ static enum fsm_event red_port_link_status_event(struct red_port *rp)
 		/* 	red_port_p2p_transition(rp, PS_PASSIVE_SLAVE); */
 		/* else */
 		/* 	red_port_p2p_transition(rp, rp->upper->state); */
+		red_port_p2p_transition(rp, PS_LISTENING);
 		if (rp->upper->state == PS_FAULTY)
 			return EV_FAULT_CLEARED;
 		else
 			red_dispatch_ports(rp->upper);
 	} else if (rp_down) {
+		red_port_p2p_transition(rp, PS_FAULTY);
 		if (other->state == PS_FAULTY) {
-			red_port_p2p_transition(rp, PS_FAULTY);
 			return EV_FAULT_DETECTED;
 		} else {
-			return red_switchover(rp, PS_FAULTY);
+			red_dispatch_ports(rp->upper); //red_switchover(rp, PS_FAULTY);
+			return EV_NONE;
 		}
 	}
 	return EV_NONE;
@@ -226,6 +231,49 @@ static int red_port_set_announce_tmo(struct red_port *rp)
 	return set_tmo_random(rp->upper->fda.fd[anno_fd],
 			      rp->upper->announceReceiptTimeout,
 			      rp->upper->announce_span, rp->upper->logAnnounceInterval);
+}
+
+static int red_port_set_fault_timer_lin(struct red_port *rp, int seconds)
+{
+	int fault_fd = red_is_a(rp) ? FD_FAULT_RED_A : FD_FAULT_RED_B;
+	return set_tmo_lin(rp->upper->fda.fd[fault_fd], seconds);
+}
+
+static int red_port_fault_timeout(struct red_port *rp, int set)
+{
+	/* struct fault_interval i; */
+
+	if (!set) {
+		pr_debug("clearing fault on %s", rp->log_name);
+		return red_port_set_fault_timer_lin(rp, 0);
+	}
+
+	pr_debug("waiting %d seconds to clear fault on %s", 10, rp->log_name);
+		 /* i.val, rp->log_name); */
+	// TODO: Fault length is hardcoded to 10
+	return red_port_set_fault_timer_lin(rp, 10);
+
+	/* fault_interval(port, last_fault_type(port), &i); */
+
+	/* if (i.type == FTMO_LINEAR_SECONDS) { */
+	/* 	pr_debug("waiting %d seconds to clear fault on %s", */
+	/* 		 i.val, port_log_name(port)); */
+	/* 	return port_set_fault_timer_lin(port, i.val); */
+	/* } else if (i.type == FTMO_LOG2_SECONDS) { */
+	/* 	pr_debug("waiting 2^{%d} seconds to clear fault on %s", */
+	/* 		 i.val, port_log_name(port)); */
+	/* 	return port_set_fault_timer_log(port, 1, i.val); */
+	/* } */
+
+	/* pr_err("Unsupported fault interval type %d", i.type); */
+	/* return -1; */
+}
+
+static enum fsm_event red_is_faulty(struct port *p)
+{
+	if (p->red_a->state == PS_FAULTY && p->red_b->state == PS_FAULTY)
+		return EV_FAULT_DETECTED;
+	return EV_NONE;
 }
 
 static void red_port_nrate_initialize(struct red_port *rp)
@@ -679,7 +727,7 @@ static int red_state_update(struct port *p, enum fsm_event event, int mdiff)
 	if (next != p->state) {
 		port_show_transition(p, next, event);
 		p->state = next;
-		port_notify_event(p, NOTIFY_PORT_STATE);
+		/* port_notify_event(p, NOTIFY_PORT_STATE); */
 		p->unicast_state_dirty = true;
 		return 1;
 	}
@@ -689,9 +737,11 @@ static int red_state_update(struct port *p, enum fsm_event event, int mdiff)
 
 static void red_switch_phc(struct port *p, int phc_index)
 {
+	struct red_port *rp = phc_index == p->red_a->phc_index ? p->red_a : p->red_b;
+
 	if (p->phc_index == phc_index)
 		return;
-	// TODO: ensure phc_index is set correctly
+
 	if (p->jbod && phc_index >= 0 ) {
 		p->phc_index = phc_index;
 		if (clock_switch_phc(p->clock, p->phc_index)) {
@@ -699,6 +749,9 @@ static void red_switch_phc(struct port *p, int phc_index)
 			port_dispatch(p, EV_FAULT_DETECTED, 0);
 		}
 		clock_sync_interval(p->clock, p->log_sync_interval);
+		struct tsproc *tsp = rp->tsproc;
+		clock_peer_delay(p->clock, rp->peer_delay,
+				 tsproc_get_t1(tsp), tsproc_get_t2(tsp), rp->nrate.ratio);
 	}
 }
 
@@ -829,6 +882,7 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 		/* break; */
 	};
 	red_port_set_state(rp, next);
+	red_port_notify_event(rp, NOTIFY_PORT_STATE);
 }
 
 /* static void red_port_faulty_dispatch(struct red_port *rp) */
@@ -914,7 +968,6 @@ static void red_p2p_transition(struct port *p, enum port_state next)
 	/* 	red_port_p2p_transition(p->red_a, next); */
 	/* 	red_port_p2p_transition(p->red_b, next); */
 	/* } */
-	red_dispatch_ports(p);
 }
 
 static void red_dispatch(struct port *p, enum fsm_event event, int mdiff)
@@ -936,10 +989,10 @@ static void red_dispatch(struct port *p, enum fsm_event event, int mdiff)
 		red_p2p_transition(p, p->state);
 	} else {
 		pr_err("RED E2E not implemented");
-		/* port_e2e_transition(p, p->state); */
+		return;
 	}
 
-	/* red_switch_phc(p); */
+	red_dispatch_ports(p);
 }
 
 static enum fsm_event red_port_sync_anno_timer(struct red_port *rp, int fd_index)
@@ -1076,6 +1129,25 @@ static int red_port_prepare_and_send(struct red_port *rp, struct ptp_message *ms
 	return 0;
 }
 
+int red_prepare_and_send(struct port *p, struct ptp_message *msg,
+			 enum transport_event event)
+{
+	return red_port_prepare_and_send(red_get_active_port(p), msg, event);
+}
+
+int red_send(struct port *p, struct ptp_message *msg)
+{
+	struct red_port *rp = red_get_active_port(p);
+	int cnt;
+
+	cnt = red_port_send(rp, TRANS_GENERAL, msg);
+	if (cnt <= 0) {
+		return -1;
+	}
+	red_stats_inc_tx(p, msg);
+	return 0;
+}
+
 static int red_peer_prepare_and_send(struct red_port *rp, struct ptp_message *msg,
 				     enum transport_event event)
 {
@@ -1105,7 +1177,7 @@ static int red_tx_sync(struct port *p, struct address *dst, uint16_t sequence_id
 	int err, event;
 
 	switch (p->timestamping) {
-	// TODO: 2-step not supported. Using TS_SOFTWARE used for testing
+	// TODO: 2-step not supported. Using TS_SOFTWARE for testing.
 	// Just sends empty Syncs.
 	case TS_SOFTWARE:
 	/* case TS_LEGACY_HW: */
@@ -1165,7 +1237,7 @@ static int red_tx_sync(struct port *p, struct address *dst, uint16_t sequence_id
 		msg->header.flagField[0] |= UNICAST;
 		msg->header.logMessageInterval = 0x7f;
 	}
-	err = red_port_prepare_and_send(red_get_active_port(p), msg, event);
+	err = red_prepare_and_send(p, msg, event);
 	if (err) {
 		pr_err("%s: send sync failed", p->log_name);
 		goto out;
@@ -1268,7 +1340,7 @@ static int red_tx_announce(struct port *p, struct address *dst, uint16_t sequenc
 		pr_err("%s: append time zones failed", p->log_name);
 	}
 	
-	err = red_port_prepare_and_send(red_get_active_port(p), msg, TRANS_GENERAL);
+	err = red_prepare_and_send(p, msg, TRANS_GENERAL);
 	if (err) {
 		pr_err("%s: send announce failed", p->log_name);
 	}
@@ -1281,6 +1353,16 @@ static int red_port_pdelay_request(struct red_port *rp)
 {
 	struct ptp_message *msg;
 	int err;
+
+	/* Time to send a new request, forget current pdelay resp and fup */
+	if (rp->peer_delay_resp) {
+		msg_put(rp->peer_delay_resp);
+		rp->peer_delay_resp = NULL;
+	}
+	if (rp->peer_delay_fup) {
+		msg_put(rp->peer_delay_fup);
+		rp->peer_delay_fup = NULL;
+	}
 	
 	if (!red_port_up(rp))
 		return 0;
@@ -1303,7 +1385,7 @@ static int red_port_pdelay_request(struct red_port *rp)
 	msg->header.messageLength      = sizeof(struct pdelay_req_msg);
 	msg->header.domainNumber       = clock_domain_number(rp->clock);
 	msg->header.correction         = -rp->asymmetry;
-	msg->header.sourcePortIdentity = rp->upper->portIdentity;
+	msg->header.sourcePortIdentity = rp->portIdentity;
 	msg->header.sequenceId         = rp->seqnum.delayreq++;
 	msg->header.logMessageInterval = rp->upper->logPdelayReqInterval;
 
@@ -1324,7 +1406,7 @@ static int red_port_pdelay_request(struct red_port *rp)
 
 	if (rp->peer_delay_req) {
 		/* if (port_capable(p)) { */
-		/* 	p->pdr_missing++; */
+			/* p->pdr_missing++; */
 		/* } */
 		msg_put(rp->peer_delay_req);
 	}
@@ -1554,7 +1636,7 @@ static int red_port_process_pdelay_req(struct red_port *rp, struct ptp_message *
 	rsp->header.ver                = ptp_hdr_ver;
 	rsp->header.messageLength      = sizeof(struct pdelay_resp_msg);
 	rsp->header.domainNumber       = m->header.domainNumber;
-	rsp->header.sourcePortIdentity = rp->upper->portIdentity;
+	rsp->header.sourcePortIdentity = rp->portIdentity;
 	rsp->header.sequenceId         = m->header.sequenceId;
 	rsp->header.logMessageInterval = 0x7f;
 
@@ -1640,11 +1722,10 @@ static void red_port_peer_delay(struct red_port *rp)
 	struct ptp_message *fup = rp->peer_delay_fup;
 
 	/* Check for response, validate port and sequence number. */
-
 	if (!rsp)
 		return;
 
-	if (!pid_eq(&rsp->pdelay_resp.requestingPortIdentity, &rp->upper->portIdentity))
+	if (!pid_eq(&rsp->pdelay_resp.requestingPortIdentity, &rp->portIdentity))
 		return;
 
 	if (rsp->header.sequenceId != ntohs(req->header.sequenceId))
@@ -1667,7 +1748,7 @@ static void red_port_peer_delay(struct red_port *rp)
 	if (!fup)
 		return;
 
-	if (!pid_eq(&fup->pdelay_resp_fup.requestingPortIdentity, &rp->upper->portIdentity))
+	if (!pid_eq(&fup->pdelay_resp_fup.requestingPortIdentity, &rp->portIdentity))
 		return;
 
 	if (fup->header.sequenceId != rsp->header.sequenceId)
@@ -1981,8 +2062,7 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 	enum fsm_event event = EV_NONE;
 	struct ptp_message *msg;
 	int cnt, fd = p->fda.fd[fd_index], err;
-	/* struct red_port *red_a = p->red_a; */
-	/* struct red_port *red_b = p->red_b; */
+	int faults = 0;
 
 	switch (fd_index) {
 	case FD_ANNOUNCE_TIMER:
@@ -1996,20 +2076,34 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 		/* delay_req_prune(p); */
 		p->service_stats.delay_timeout++;
 		if (red_port_pdelay_request(p->red_a)) {
-			return EV_FAULT_DETECTED;
+			red_port_p2p_transition(p->red_a, PS_FAULTY);
+			red_port_fault_timeout(p->red_a, 1);
+			faults++;
 		}
 		if (red_port_pdelay_request(p->red_b)) {
-			return EV_FAULT_DETECTED;
+			red_port_p2p_transition(p->red_b, PS_FAULTY);
+			red_port_fault_timeout(p->red_b, 1);
+			faults++;
 		}
-		if (p->delay_response_timeout && p->state == PS_SLAVE) {
-			p->delay_response_counter++;
-			if (p->delay_response_counter >= p->delay_response_timeout) {
-				p->delay_response_counter = 0;
-				tsproc_reset(clock_get_tsproc(p->clock), 1);
-				pr_err("%s: delay response timeout", p->log_name);
-				return EV_SYNCHRONIZATION_FAULT;
-			}
+		if (faults) {
+			/* If both ports are faulty, return ev fault.
+			 * If only one is faulty, dispatch and update states.
+			 */
+			if (red_is_faulty(p))
+				return EV_FAULT_DETECTED;
+			else if (faults)
+				red_dispatch_ports(p);
 		}
+
+		/* if (p->delay_response_timeout && p->state == PS_SLAVE) { */
+		/* 	p->delay_response_counter++; */
+		/* 	if (p->delay_response_counter >= p->delay_response_timeout) { */
+		/* 		p->delay_response_counter = 0; */
+		/* 		tsproc_reset(clock_get_tsproc(p->clock), 1); */
+		/* 		pr_err("%s: delay response timeout", p->log_name); */
+		/* 		return EV_SYNCHRONIZATION_FAULT; */
+		/* 	} */
+		/* } */
 		return EV_NONE;
 
 	case FD_QUALIFICATION_TIMER:
@@ -2066,6 +2160,16 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 	/* 		return EV_FAULT_DETECTED; */
 	/* 	else */
 	/* 		return EV_NONE; */
+	case FD_FAULT_RED_A:
+		pr_err("TODO: implement FD_FAULT_RED_A");
+		if (p->state == PS_FAULTY)
+			return EV_FAULT_CLEARED;
+		break;
+	case FD_FAULT_RED_B:
+		pr_err("TODO: implement FD_FAULT_RED_B");
+		if (p->state == PS_FAULTY)
+			return EV_FAULT_CLEARED;
+		break;
 	}
 
 	/* TODO: Handle FD_EVENT_B, FD_GENERAL_B. Maybe FD_ANNOUNCE_B */
@@ -2157,8 +2261,8 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 	/* 	break; */
 	case MANAGEMENT:
 		// TODO
-		/* if (red_port_clock_manage(p->clock, rp, msg)) */
-			/* event = EV_STATE_DECISION_EVENT; */
+		if (clock_manage(p->clock, p, msg))
+			event = EV_STATE_DECISION_EVENT;
 		break;
 	}
 
@@ -2349,7 +2453,11 @@ struct port *red_open(const char *phc_device,
 
 	p->timestamping = timestamping;
 	p->portIdentity.clockIdentity = clock_identity(clock);
+	p->red_a->portIdentity.clockIdentity = clock_identity(clock);
+	p->red_b->portIdentity.clockIdentity = clock_identity(clock);
 	p->portIdentity.portNumber = number;
+	p->red_a->portIdentity.portNumber = number;
+	p->red_b->portIdentity.portNumber = number + 1;
 	p->state = PS_INITIALIZING;
 	red_a->state = PS_INITIALIZING;
 	red_b->state = PS_INITIALIZING;
@@ -2485,6 +2593,8 @@ void red_close(struct port *p)
 	/* unicast_client_cleanup(p); */
 	/* unicast_service_cleanup(p); */
 	interface_destroy(p->iface);
+	red_port_flush_peer_delay(p->red_a);
+	red_port_flush_peer_delay(p->red_b);
 	transport_destroy(p->red_a->trp);
 	transport_destroy(p->red_b->trp);
 	tsproc_destroy(p->red_a->tsproc);
@@ -2493,9 +2603,15 @@ void red_close(struct port *p)
 	free(p->red_b->log_name);
 	free(p->red_a);
 	free(p->red_b);
-	/* if (p->fault_fd >= 0) { */
-	/* 	close(p->fault_fd); */
+	/* if (p->red_a->fault_fd >= 0) { */
+	/* 	close(p->red_a->fault_fd); */
 	/* } */
+	/* if (p->red_b->fault_fd >= 0) { */
+	/* 	close(p->red_b->fault_fd); */
+	/* } */
+	if (p->fault_fd >= 0) {
+		close(p->fault_fd);
+	}
 	free(p->log_name);
 	free(p);
 }
@@ -2583,4 +2699,444 @@ static void red_dispatch_ports(struct port *p)
 
 	if (p->state == PS_UNCALIBRATED || p->state == PS_SLAVE)
 		red_switch_phc(p, phc_index);
+}
+
+/* static int red_port_management_get_response(struct red_port *rp, */
+/* 					    struct port *ingress, int id, */
+/* 					    struct ptp_message *req) */
+/* { */
+/* 	struct PortIdentity pid = port_identity(target); */
+/* 	struct ptp_message *rsp; */
+/* 	int respond; */
+
+/* 	rsp = port_management_reply(pid, ingress, req); */
+/* 	if (!rsp) { */
+/* 		return 0; */
+/* 	} */
+/* 	respond = port_management_fill_response(target, rsp, id); */
+/* 	if (respond) */
+/* 		port_prepare_and_send(ingress, rsp, TRANS_GENERAL); */
+/* 	msg_put(rsp); */
+/* 	return respond; */
+/* } */
+
+/* int red_manage(struct port *p, struct port *ingress, struct ptp_message *msg) */
+/* { */
+/* 	struct management_tlv *mgt; */
+/* 	UInteger16 target = msg->management.targetPortIdentity.portNumber; */
+
+/* 	if (target != portnum(p) && target != 0xffff) { */
+/* 		return 0; */
+/* 	} */
+/* 	mgt = (struct management_tlv *) msg->management.suffix; */
+
+/* 	switch (management_action(msg)) { */
+/* 	case GET: */
+/* 		if (port_management_get_response(p, ingress, mgt->id, msg)) */
+/* 			return 1; */
+/* 		break; */
+/* 	case SET: */
+/* 		if (port_management_set(p, ingress, mgt->id, msg)) */
+/* 			return 1; */
+/* 		break; */
+/* 	case COMMAND: */
+/* 		break; */
+/* 	default: */
+/* 		return -1; */
+/* 	} */
+
+/* 	switch (mgt->id) { */
+/* 	case MID_NULL_MANAGEMENT: */
+/* 	case MID_CLOCK_DESCRIPTION: */
+/* 	case MID_PORT_DATA_SET: */
+/* 	case MID_LOG_ANNOUNCE_INTERVAL: */
+/* 	case MID_ANNOUNCE_RECEIPT_TIMEOUT: */
+/* 	case MID_LOG_SYNC_INTERVAL: */
+/* 	case MID_VERSION_NUMBER: */
+/* 	case MID_ENABLE_PORT: */
+/* 	case MID_DISABLE_PORT: */
+/* 	case MID_UNICAST_NEGOTIATION_ENABLE: */
+/* 	case MID_UNICAST_MASTER_TABLE: */
+/* 	case MID_UNICAST_MASTER_MAX_TABLE_SIZE: */
+/* 	case MID_ACCEPTABLE_MASTER_TABLE_ENABLED: */
+/* 	case MID_ALTERNATE_MASTER: */
+/* 	case MID_MASTER_ONLY: */
+/* 	case MID_TRANSPARENT_CLOCK_PORT_DATA_SET: */
+/* 	case MID_DELAY_MECHANISM: */
+/* 	case MID_LOG_MIN_PDELAY_REQ_INTERVAL: */
+/* 		port_management_send_error(p, ingress, msg, MID_NOT_SUPPORTED); */
+/* 		break; */
+/* 	default: */
+/* 		port_management_send_error(p, ingress, msg, MID_NO_SUCH_ID); */
+/* 		return -1; */
+/* 	} */
+/* 	return 1; */
+/* } */
+
+static const Octet profile_id_drr[] = {0x00, 0x1B, 0x19, 0x00, 0x01, 0x00};
+static const Octet profile_id_p2p[] = {0x00, 0x1B, 0x19, 0x00, 0x02, 0x00};
+static const Octet profile_id_8275_1[] = {0x00, 0x19, 0xA7, 0x01, 0x02, 0x03};
+static const Octet profile_id_8275_2[] = {0x00, 0x19, 0xA7, 0x02, 0x01, 0x02};
+
+static int red_port_management_fill_response(struct red_port *rp,
+					     struct ptp_message *rsp, int id)
+{
+	struct ieee_c37_238_settings_np *pwr;
+	/* struct unicast_master_table_np *umtn; */
+	struct transparentClockPortDS *tcpds;
+	/* struct unicast_master_address *ucma; */
+	struct port_service_stats_np *pssn;
+	struct mgmt_clock_description *cd;
+	struct management_tlv_datum *mtd;
+	/* struct unicast_master_entry *ume; */
+	struct clock_description *desc;
+	struct port_properties_np *ppn;
+	struct port_hwclock_np *phn;
+	struct management_tlv *tlv;
+	struct port_stats_np *psn;
+	/* struct foreign_clock *fc; */
+	struct port_ds_np *pdsnp;
+	struct tlv_extra *extra;
+	/* struct PortIdentity pid; */
+	const char *ts_label;
+	struct portDS *pds;
+	uint16_t u16;
+	uint8_t *buf;
+	int datalen;
+	struct port *target = rp->upper;
+
+	extra = tlv_extra_alloc();
+	if (!extra) {
+		pr_err("failed to allocate TLV descriptor");
+		return 0;
+	}
+	extra->tlv = (struct TLV *) rsp->management.suffix;
+
+	tlv = (struct management_tlv *) rsp->management.suffix;
+	tlv->type = TLV_MANAGEMENT;
+	tlv->id = id;
+
+	switch (id) {
+	case MID_NULL_MANAGEMENT:
+		datalen = 0;
+		break;
+	case MID_CLOCK_DESCRIPTION:
+		cd = &extra->cd;
+		buf = tlv->data;
+		cd->clockType = (UInteger16 *) buf;
+		buf += sizeof(*cd->clockType);
+		*cd->clockType = clock_type(target->clock);
+		cd->physicalLayerProtocol = (struct PTPText *) buf;
+		switch(transport_type(target->trp)) {
+		case TRANS_UDP_IPV4:
+		case TRANS_UDP_IPV6:
+		case TRANS_IEEE_802_3:
+			ptp_text_set(cd->physicalLayerProtocol, "IEEE 802.3");
+			break;
+		default:
+			ptp_text_set(cd->physicalLayerProtocol, NULL);
+			break;
+		}
+		buf += sizeof(struct PTPText) + cd->physicalLayerProtocol->length;
+
+		cd->physicalAddress = (struct PhysicalAddress *) buf;
+		u16 = transport_physical_addr(target->trp,
+                                              cd->physicalAddress->address);
+		memcpy(&cd->physicalAddress->length, &u16, 2);
+		buf += sizeof(struct PhysicalAddress) + u16;
+
+		cd->protocolAddress = (struct PortAddress *) buf;
+		u16 = transport_type(target->trp);
+		memcpy(&cd->protocolAddress->networkProtocol, &u16, 2);
+		u16 = transport_protocol_addr(target->trp,
+                                              cd->protocolAddress->address);
+		memcpy(&cd->protocolAddress->addressLength, &u16, 2);
+		buf += sizeof(struct PortAddress) + u16;
+
+		desc = clock_description(target->clock);
+		cd->manufacturerIdentity = buf;
+		memcpy(cd->manufacturerIdentity,
+                       desc->manufacturerIdentity, OUI_LEN);
+		buf += OUI_LEN;
+		*(buf++) = 0; /* reserved */
+
+		cd->productDescription = (struct PTPText *) buf;
+		ptp_text_copy(cd->productDescription, &desc->productDescription);
+		buf += sizeof(struct PTPText) + cd->productDescription->length;
+
+		cd->revisionData = (struct PTPText *) buf;
+		ptp_text_copy(cd->revisionData, &desc->revisionData);
+		buf += sizeof(struct PTPText) + cd->revisionData->length;
+
+		cd->userDescription = (struct PTPText *) buf;
+		ptp_text_copy(cd->userDescription, &desc->userDescription);
+		buf += sizeof(struct PTPText) + cd->userDescription->length;
+
+		if (target->delayMechanism == DM_P2P) {
+			memcpy(buf, profile_id_p2p, PROFILE_ID_LEN);
+		} else {
+			struct config *cfg = clock_config(target->clock);
+			if (config_get_int(cfg, NULL, "dataset_comparison") ==
+			    DS_CMP_G8275) {
+				if (transport_type(target->trp) == TRANS_IEEE_802_3) {
+					memcpy(buf, profile_id_8275_1, PROFILE_ID_LEN);
+				} else {
+					memcpy(buf, profile_id_8275_2, PROFILE_ID_LEN);
+				}
+			} else {
+				memcpy(buf, profile_id_drr, PROFILE_ID_LEN);
+			}
+		}
+		buf += PROFILE_ID_LEN;
+		datalen = buf - tlv->data;
+		break;
+	case MID_PORT_DATA_SET:
+		pds = (struct portDS *) tlv->data;
+		pds->portIdentity            = rp->portIdentity;
+		if (target->state == PS_GRAND_MASTER) {
+			pds->portState = PS_MASTER;
+		} else {
+			pds->portState = rp->state;
+		}
+		pds->logMinDelayReqInterval  = target->logMinDelayReqInterval;
+		pds->peerMeanPathDelay       = rp->peerMeanPathDelay;
+		pds->logAnnounceInterval     = target->logAnnounceInterval;
+		pds->announceReceiptTimeout  = target->announceReceiptTimeout;
+		pds->logSyncInterval         = target->logSyncInterval;
+		if (target->delayMechanism) {
+			pds->delayMechanism = target->delayMechanism;
+		} else {
+			pds->delayMechanism = DM_E2E;
+		}
+		pds->logMinPdelayReqInterval = target->logMinPdelayReqInterval;
+		pds->versionNumber           = target->versionNumber;
+		datalen = sizeof(*pds);
+		break;
+	case MID_LOG_ANNOUNCE_INTERVAL:
+		mtd = (struct management_tlv_datum *) tlv->data;
+		mtd->val = target->logAnnounceInterval;
+		datalen = sizeof(*mtd);
+		break;
+	case MID_ANNOUNCE_RECEIPT_TIMEOUT:
+		mtd = (struct management_tlv_datum *) tlv->data;
+		mtd->val = target->announceReceiptTimeout;
+		datalen = sizeof(*mtd);
+		break;
+	case MID_LOG_SYNC_INTERVAL:
+		mtd = (struct management_tlv_datum *) tlv->data;
+		mtd->val = target->logSyncInterval;
+		datalen = sizeof(*mtd);
+		break;
+	case MID_VERSION_NUMBER:
+		mtd = (struct management_tlv_datum *) tlv->data;
+		mtd->val = target->versionNumber;
+		datalen = sizeof(*mtd);
+		break;
+	case MID_MASTER_ONLY:
+		mtd = (struct management_tlv_datum *) tlv->data;
+		mtd->val = target->master_only;
+		datalen = sizeof(*mtd);
+		break;
+	case MID_TRANSPARENT_CLOCK_PORT_DATA_SET:
+		tcpds = (struct transparentClockPortDS *) tlv->data;
+		tcpds->portIdentity            = rp->portIdentity;
+		tcpds->faultyFlag              = (rp->state == PS_FAULTY);
+		tcpds->logMinPdelayReqInterval = target->logMinPdelayReqInterval;
+		tcpds->peerMeanPathDelay       = rp->peerMeanPathDelay;
+		datalen = sizeof(*tcpds);
+		break;
+	case MID_DELAY_MECHANISM:
+		mtd = (struct management_tlv_datum *) tlv->data;
+		if (target->delayMechanism)
+			mtd->val = target->delayMechanism;
+		else
+			mtd->val = DM_E2E;
+		datalen = sizeof(*mtd);
+		break;
+	case MID_LOG_MIN_PDELAY_REQ_INTERVAL:
+		mtd = (struct management_tlv_datum *) tlv->data;
+		mtd->val = target->logMinPdelayReqInterval;
+		datalen = sizeof(*mtd);
+		break;
+	case MID_PORT_DATA_SET_NP:
+		pdsnp = (struct port_ds_np *) tlv->data;
+		pdsnp->neighborPropDelayThresh = target->neighborPropDelayThresh;
+		pdsnp->asCapable = target->asCapable;
+		datalen = sizeof(*pdsnp);
+		break;
+	case MID_PORT_PROPERTIES_NP:
+		ppn = (struct port_properties_np *)tlv->data;
+		ppn->portIdentity = rp->portIdentity;
+		if (target->state == PS_GRAND_MASTER)
+			ppn->port_state = PS_MASTER;
+		else
+			ppn->port_state = rp->state;
+		ppn->timestamping = target->timestamping;
+		ts_label = interface_label(rp->iface);
+		ptp_text_set(&ppn->interface, ts_label);
+		datalen = sizeof(*ppn) + ppn->interface.length;
+		break;
+	case MID_PORT_STATS_NP:
+		psn = (struct port_stats_np *)tlv->data;
+		psn->portIdentity = target->portIdentity;
+		psn->stats = target->stats;
+		datalen = sizeof(*psn);
+		break;
+	case MID_PORT_SERVICE_STATS_NP:
+		pssn = (struct port_service_stats_np *)tlv->data;
+		pssn->portIdentity = target->portIdentity;
+		pssn->stats = target->service_stats;
+		datalen = sizeof(*pssn);
+		break;
+	/* case MID_UNICAST_MASTER_TABLE_NP: */
+	/* 	umtn = (struct unicast_master_table_np *)tlv->data; */
+	/* 	buf = tlv->data + sizeof(umtn->actual_table_size); */
+	/* 	if (!unicast_client_enabled(target)) { */
+	/* 		umtn->actual_table_size = 0; */
+	/* 		datalen = buf - tlv->data; */
+	/* 		break; */
+	/* 	} */
+
+	/* 	STAILQ_FOREACH(ucma, &target->unicast_master_table->addrs, */
+	/* 			list) { */
+	/* 		ume = (struct unicast_master_entry *) buf; */
+	/* 		ume->address.networkProtocol = ucma->type; */
+	/* 		address_to_portaddress( */
+	/* 			&ucma->address, &ume->address); */
+	/* 		ume->port_identity = ucma->portIdentity; */
+	/* 		ume->port_state = ucma->state; */
+	/* 		pid = clock_parent_identity(target->clock); */
+	/* 		if (pid_eq(&ucma->portIdentity, &pid)) { */
+	/* 			ume->selected = 1; */
+	/* 		} */
+
+	/* 		/\* iterate over foreign masters and search for */
+	/* 		 * the current identity */
+	/* 		 *\/ */
+	/* 		LIST_FOREACH(fc, &target->foreign_masters, */
+	/* 				list) { */
+	/* 			if (pid_eq(&ume->port_identity, */
+	/* 					&fc->dataset.sender)) { */
+	/* 				ume->clock_quality = */
+	/* 					fc->dataset.quality; */
+	/* 				ume->priority1 = fc->dataset.priority1; */
+	/* 				ume->priority2 = fc->dataset.priority2; */
+	/* 				break; */
+	/* 			} */
+	/* 		} */
+	/* 		buf += sizeof(struct unicast_master_entry) + */
+	/* 			ume->address.addressLength; */
+	/* 		umtn->actual_table_size++; */
+	/* 	} */
+	/* 	datalen = buf - tlv->data; */
+	/* 	break; */
+	case MID_PORT_HWCLOCK_NP:
+		phn = (struct port_hwclock_np *)tlv->data;
+		phn->portIdentity = rp->portIdentity;
+		phn->phc_index = rp->phc_index;
+		phn->flags = interface_get_vclock(rp->iface) >= 0 ?
+			PORT_HWCLOCK_VCLOCK : 0;
+		datalen = sizeof(*phn);
+		break;
+	case MID_POWER_PROFILE_SETTINGS_NP:
+		pwr = (struct ieee_c37_238_settings_np *)tlv->data;
+		memcpy(pwr, &target->pwr, sizeof(*pwr));
+		datalen = sizeof(*pwr);
+		break;
+	default:
+		/* The caller should *not* respond to this message. */
+		tlv_extra_recycle(extra);
+		return 0;
+	}
+
+	if (datalen % 2) {
+		tlv->data[datalen] = 0;
+		datalen++;
+	}
+	tlv->length = sizeof(tlv->id) + datalen;
+	rsp->header.messageLength += sizeof(*tlv) + datalen;
+	msg_tlv_attach(rsp, extra);
+
+	/* The caller can respond to this message. */
+	return 1;
+}
+
+static int red_port_management_get_response(struct red_port *rp,
+					    struct port *ingress, int id,
+					    struct ptp_message *req)
+
+{
+	struct PortIdentity pid = rp->portIdentity;
+	struct ptp_message *rsp;
+	int respond;
+
+	rsp = port_management_reply(pid, ingress, req);
+	if (!rsp) {
+		return 0;
+	}
+
+	respond = red_port_management_fill_response(rp, rsp, id);
+	if (respond) {
+		if (port_is_red(ingress)) {
+			red_prepare_and_send(ingress, rsp, TRANS_GENERAL);
+		} else {
+			port_prepare_and_send(ingress, rsp, TRANS_GENERAL);
+		}
+	}
+	msg_put(rsp);
+	return respond;
+}
+
+int red_management_get_response(struct port *target,
+				struct port *ingress, int id,
+				struct ptp_message *req)
+{
+	UInteger16 target_port = req->management.targetPortIdentity.portNumber;
+	int respond = 0;
+
+	if (target_port == target->red_a->portIdentity.portNumber) {
+		respond += red_port_management_get_response(target->red_a, ingress, id, req);
+	} else if (target_port == target->red_b->portIdentity.portNumber) {
+		respond += red_port_management_get_response(target->red_b, ingress, id, req);
+	} else {
+		respond += red_port_management_get_response(target->red_a, ingress, id, req);
+		respond += red_port_management_get_response(target->red_b, ingress, id, req);
+	}
+
+	return respond;
+}
+
+static void red_port_notify_event(struct red_port *rp, enum notification event)
+{
+	struct PortIdentity pid = rp->portIdentity;
+	struct ptp_message *msg;
+	int id;
+
+	switch (event) {
+	case NOTIFY_PORT_STATE:
+		id = MID_PORT_DATA_SET;
+		break;
+	default:
+		return;
+	}
+	/* targetPortIdentity and sequenceId will be filled by
+	 * clock_send_notification */
+	msg = port_management_notify(pid, rp->upper);
+	if (!msg)
+		return;
+	if (!red_port_management_fill_response(rp, msg, id))
+		goto err;
+	if (msg_pre_send(msg))
+		goto err;
+	clock_send_notification(rp->clock, msg, event);
+err:
+	msg_put(msg);
+}
+
+bool red_portnum_is_red(struct port *p, int target)
+{
+	bool is_a = p->red_a->portIdentity.portNumber == target;
+	bool is_b = p->red_b->portIdentity.portNumber == target;
+
+	return is_a || is_b;
 }

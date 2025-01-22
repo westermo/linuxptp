@@ -54,6 +54,7 @@ struct red_port {
 	struct tsproc         *tsproc;
 	struct nrate_estimator nrate;
 	unsigned int          pdr_missing;
+	struct PortIdentity   portIdentity;
 	enum port_state       state; /*portState*/
 	Integer64             asymmetry;
 	Integer64             rx_timestamp_offset;

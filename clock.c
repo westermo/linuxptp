@@ -1079,6 +1079,7 @@ static int clock_add_red_port(struct clock *c, const char *phc_device,
 	}
 	p = red_open(phc_device, phc_index, timestamping,
 		      ++c->last_port_number, iface_a, iface_b, c);
+	c->last_port_number++; /* Increment again since RED consumes two ports */
 	if (!p) {
 		/* No need to shrink pollfd */
 		return -1;
@@ -1091,6 +1092,7 @@ static int clock_add_red_port(struct clock *c, const char *phc_device,
 	} else {
 		LIST_INSERT_HEAD(&c->ports, p, list);
 	}
+	/* Even though RED has two ports, we cannot increment this since that affects other things */
 	c->nports++;
 	clock_fda_changed(c);
 
@@ -1511,14 +1513,15 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 		}
 	}
 
+	c->dds.numberPorts = c->nports;
+
 	if (iface_a && iface_b) {
 		if (clock_add_red_port(c, phc_device, phc_index, timestamping, iface_a, iface_b)) {
 			pr_err("failed to open port RED port");
 			return NULL;
 		}
+		c->dds.numberPorts += 2;
 	}
-
-	c->dds.numberPorts = c->nports;
 
 	c->hsr_prp_mode = config_get_int(config, NULL, "hsr_prp_mode");
 	c->tc_hw_fwd = config_get_int(config, NULL, "tc_hw_fwd");
@@ -1806,7 +1809,6 @@ int clock_do_manage(struct clock *c, struct port *p, struct ptp_message *msg)
 	default:
 		answers = 0;
 		LIST_FOREACH(piter, &c->ports, list) {
-			// TODO: Add separate port_manage for RED
 			res = port_manage(piter, p, msg);
 			if (res < 0)
 				return changed;

@@ -31,6 +31,7 @@
 /* 	struct red_port pb; */
 /* }; */
 
+struct red_port;
 
 struct port *red_open(const char *phc_device,
 		      int phc_index,
@@ -41,5 +42,13 @@ struct port *red_open(const char *phc_device,
 		      struct clock *clock);
 void red_close(struct port *p);
 struct foreign_clock *red_compute_best(struct port *p);
+int red_prepare_and_send(struct port *p, struct ptp_message *msg,
+			 enum transport_event event);
+int red_send(struct port *p, struct ptp_message *msg);
+/* int red_manage(struct port *p, struct port *ingress, struct ptp_message *msg); */
+int red_management_get_response(struct port *target,
+				struct port *ingress, int id,
+				struct ptp_message *req);
+bool red_portnum_is_red(struct port *p, int target);
 
 #endif /* __RED_H__ */

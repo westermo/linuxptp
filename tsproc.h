@@ -107,4 +107,7 @@ int tsproc_update_offset(struct tsproc *tsp, tmv_t *offset, double *weight);
  */
 void tsproc_reset(struct tsproc *tsp, int full);
 
+tmv_t tsproc_get_t1(struct tsproc *tsp);
+tmv_t tsproc_get_t2(struct tsproc *tsp);
+
 #endif

@@ -50,6 +50,7 @@
 #include "unicast_client.h"
 #include "unicast_service.h"
 #include "util.h"
+#include "red.h"
 
 #define ANNOUNCE_SPAN 1
 
@@ -1166,13 +1167,23 @@ static int port_management_get_response(struct port *target,
 	struct ptp_message *rsp;
 	int respond;
 
+	if (port_is_red(target)) {
+		return red_management_get_response(target, ingress, id, req);
+	}
+
 	rsp = port_management_reply(pid, ingress, req);
 	if (!rsp) {
 		return 0;
 	}
+
 	respond = port_management_fill_response(target, rsp, id);
-	if (respond)
-		port_prepare_and_send(ingress, rsp, TRANS_GENERAL);
+	if (respond) {
+		if (port_is_red(ingress)) {
+			red_prepare_and_send(ingress, rsp, TRANS_GENERAL);
+		} else {
+			port_prepare_and_send(ingress, rsp, TRANS_GENERAL);
+		}
+	}
 	msg_put(rsp);
 	return respond;
 }
@@ -3083,6 +3094,10 @@ static enum fsm_event bc_event(struct port *p, int fd_index)
 int port_forward(struct port *p, struct ptp_message *msg)
 {
 	int cnt;
+
+	if (port_is_red(p))
+		return red_send(p, msg);
+
 	cnt = transport_send(p->trp, &p->fda, TRANS_GENERAL, msg);
 	if (cnt <= 0) {
 		return -1;
@@ -3153,7 +3168,13 @@ int port_manage(struct port *p, struct port *ingress, struct ptp_message *msg)
 	UInteger16 target = msg->management.targetPortIdentity.portNumber;
 
 	if (target != portnum(p) && target != 0xffff) {
-		return 0;
+		/* RED port B is has its own PID not shared with any `struct port`,
+		 * so we need to check both red_port.
+		 */
+		if (!port_is_red(p))
+			return 0;
+		if (!red_portnum_is_red(p, target))
+			return 0;
 	}
 	mgt = (struct management_tlv *) msg->management.suffix;
 
