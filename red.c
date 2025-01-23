@@ -354,6 +354,7 @@ static int red_port_initialize(struct red_port *rp)
 	clock_fda_changed(rp->upper->clock);
 	return 0;
 no_tmo:
+	// TODO: swap FDs if necessary
 	transport_close(rp->trp, &rp->upper->fda);
 no_tropen:
 	return -1;
@@ -476,6 +477,7 @@ int red_initialize(struct port *p)
 	return 0;
 
 no_tmo:
+	// TODO: swap FDs if necessary
 	transport_close(p->trp, &p->fda);
 /* no_tropen: */
 no_timers:
@@ -1229,7 +1231,11 @@ static int red_tx_sync(struct port *p, struct address *dst, uint16_t sequence_id
 		/* It seems to assume corrections should be done in hardware
 		 * for onestep sync. Let's try in software.
 		 */
-		msg->header.correction = p->tx_timestamp_offset;
+		/* TODO:/Note: Since packets are duplicated in HW, it
+		* doesn't make sense if the ports have different offsets.
+		* But we need to use from one of the ports.
+		*/
+		msg->header.correction = red_get_active_port(p)->tx_timestamp_offset;
 	}
 
 	if (dst) {
@@ -1689,7 +1695,7 @@ static int red_port_process_pdelay_req(struct red_port *rp, struct ptp_message *
 	fup->header.messageLength      = sizeof(struct pdelay_resp_fup_msg);
 	fup->header.domainNumber       = m->header.domainNumber;
 	fup->header.correction         = m->header.correction;
-	fup->header.sourcePortIdentity = rp->upper->portIdentity;
+	fup->header.sourcePortIdentity = rp->portIdentity;
 	fup->header.sequenceId         = m->header.sequenceId;
 	fup->header.logMessageInterval = 0x7f;
 
@@ -2827,7 +2833,7 @@ static int red_port_management_fill_response(struct red_port *rp,
 		buf += sizeof(*cd->clockType);
 		*cd->clockType = clock_type(target->clock);
 		cd->physicalLayerProtocol = (struct PTPText *) buf;
-		switch(transport_type(target->trp)) {
+		switch(transport_type(rp->trp)) {
 		case TRANS_UDP_IPV4:
 		case TRANS_UDP_IPV6:
 		case TRANS_IEEE_802_3:
@@ -2840,15 +2846,15 @@ static int red_port_management_fill_response(struct red_port *rp,
 		buf += sizeof(struct PTPText) + cd->physicalLayerProtocol->length;
 
 		cd->physicalAddress = (struct PhysicalAddress *) buf;
-		u16 = transport_physical_addr(target->trp,
+		u16 = transport_physical_addr(rp->trp,
                                               cd->physicalAddress->address);
 		memcpy(&cd->physicalAddress->length, &u16, 2);
 		buf += sizeof(struct PhysicalAddress) + u16;
 
 		cd->protocolAddress = (struct PortAddress *) buf;
-		u16 = transport_type(target->trp);
+		u16 = transport_type(rp->trp);
 		memcpy(&cd->protocolAddress->networkProtocol, &u16, 2);
-		u16 = transport_protocol_addr(target->trp,
+		u16 = transport_protocol_addr(rp->trp,
                                               cd->protocolAddress->address);
 		memcpy(&cd->protocolAddress->addressLength, &u16, 2);
 		buf += sizeof(struct PortAddress) + u16;
@@ -2878,7 +2884,7 @@ static int red_port_management_fill_response(struct red_port *rp,
 			struct config *cfg = clock_config(target->clock);
 			if (config_get_int(cfg, NULL, "dataset_comparison") ==
 			    DS_CMP_G8275) {
-				if (transport_type(target->trp) == TRANS_IEEE_802_3) {
+				if (transport_type(rp->trp) == TRANS_IEEE_802_3) {
 					memcpy(buf, profile_id_8275_1, PROFILE_ID_LEN);
 				} else {
 					memcpy(buf, profile_id_8275_2, PROFILE_ID_LEN);
