@@ -26,6 +26,7 @@
 #include "fsm.h"
 #include "monitor.h"
 #include "msg.h"
+#include "net_tstamp_cpy.h"
 #include "power_profile.h"
 #include "tmv.h"
 #include "util.h"
@@ -180,6 +181,7 @@ struct port {
 	struct onestep_conversion_info onestep_info;
 	struct red_port *red_a;
 	struct red_port *red_b;
+	enum hwtstamp_clk_types curr_clktype;
 	int egress_vlan_tagged;
 	int egress_vlan_id;
 	int egress_vlan_prio;

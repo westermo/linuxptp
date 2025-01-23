@@ -37,6 +37,7 @@
 #include "fsm.h"
 #include "interface.h"
 #include "msg.h"
+#include "net_tstamp_cpy.h"
 #include "port_private.h"
 #include "tmv.h"
 #include "transport.h"
@@ -45,11 +46,14 @@
 #include "rtnl.h"
 #include "red.h"
 #include "red_private.h"
+#include "transport_private.h"
 
 static void red_port_p2p_transition(struct red_port *rp, enum port_state next);
 static enum fsm_event red_switchover(struct red_port *from, enum port_state from_next);
 static void red_dispatch_ports(struct port *p);
 static void red_port_notify_event(struct red_port *rp, enum notification event);
+static void red_hsr_swap_clock_mode(struct port *p);
+
 
 static bool red_is_a(struct red_port *rp)
 {
@@ -995,6 +999,7 @@ static void red_dispatch(struct port *p, enum fsm_event event, int mdiff)
 	}
 
 	red_dispatch_ports(p);
+	red_hsr_swap_clock_mode(p);
 }
 
 static enum fsm_event red_port_sync_anno_timer(struct red_port *rp, int fd_index)
@@ -2547,6 +2552,11 @@ struct port *red_open(const char *phc_device,
 	}
 	p->errorCounter = 0;
 
+	if (clock_type(p->clock) == CLOCK_TYPE_BOUNDARY)
+		p->curr_clktype = HWTSTAMP_CLOCK_TYPE_BOUNDARY_CLOCK;
+	else
+		p->curr_clktype = HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK;
+
 	return p;
 
 err_tsproc:
@@ -3208,4 +3218,43 @@ bool red_portnum_is_red(struct port *p, int target)
 	bool is_b = p->red_b->portIdentity.portNumber == target;
 
 	return is_a || is_b;
+}
+
+/* For HSR BC since passive/receiving BC needs to forward in HW like a TC */
+static void red_port_set_socket_clk_type(struct red_port *rp, int clk_type)
+{
+	int event_fd = red_event_fd(rp);
+	int header_offset;
+
+	if (rp->upper->fda.fd[event_fd] < 0)
+		return;
+
+	header_offset = config_get_int(rp->trp->cfg, interface_label(rp->iface), "ptp_header_offset");
+	sk_timestamping_init(rp->upper->fda.fd[event_fd], interface_label(rp->iface), clk_type,
+			     rp->upper->timestamping, TRANS_IEEE_802_3, interface_get_vclock(rp->iface),
+			     clock_domain_number(rp->clock), rp->upper->delayMechanism, header_offset);
+}
+
+/* HSR ports need to be put in TC mode when in passive/receiving state to forward in HW */
+static void red_hsr_swap_clock_mode(struct port *p)
+{
+	enum hwtstamp_clk_types clktype;
+
+	if (clock_type(p->clock) != CLOCK_TYPE_BOUNDARY || !clock_is_hsr(p->clock))
+		return;
+
+	if (p->state == PS_MASTER || p->state == PS_GRAND_MASTER) {
+		if (p->curr_clktype == HWTSTAMP_CLOCK_TYPE_BOUNDARY_CLOCK)
+			return;
+		pr_info("Reconfiguring %s for BC", port_log_name(p));
+		clktype = HWTSTAMP_CLOCK_TYPE_BOUNDARY_CLOCK;
+	} else {
+		if (p->curr_clktype == HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK)
+			return;
+		pr_info("Reconfiguring %s for TC", port_log_name(p));
+		clktype = HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK;
+	}
+	red_port_set_socket_clk_type(p->red_a, clktype);
+	red_port_set_socket_clk_type(p->red_b, clktype);
+	p->curr_clktype = clktype;
 }
