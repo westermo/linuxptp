@@ -54,6 +54,17 @@ static void red_dispatch_ports(struct port *p);
 static void red_port_notify_event(struct red_port *rp, enum notification event);
 static void red_hsr_swap_clock_mode(struct port *p);
 
+static void red_fds_swap(struct port *p)
+{
+	int tmp_efd = 0;
+	int tmp_gfd = 0;
+	tmp_efd = p->fda.fd[FD_EVENT];
+	tmp_gfd = p->fda.fd[FD_GENERAL];
+	p->fda.fd[FD_EVENT] = p->fda.fd[FD_EVENT_B];
+	p->fda.fd[FD_GENERAL] = p->fda.fd[FD_GENERAL_B];
+	p->fda.fd[FD_EVENT_B] = tmp_efd;
+	p->fda.fd[FD_GENERAL_B] = tmp_gfd;
+}
 
 static bool red_is_a(struct red_port *rp)
 {
@@ -320,20 +331,18 @@ static void red_port_init_rtnl(struct red_port *rp)
 
 static int red_port_initialize(struct red_port *rp)
 {
-	int tmp_efd, tmp_gfd;
+	if (red_is_a(rp)) {
+		if (transport_open(rp->trp, rp->iface, &rp->upper->fda, rp->upper->timestamping))
+			goto no_tropen;
 
-	tmp_efd = rp->upper->fda.fd[FD_EVENT];
-	tmp_gfd = rp->upper->fda.fd[FD_GENERAL];
-	if (transport_open(rp->trp, rp->iface, &rp->upper->fda, rp->upper->timestamping))
-		goto no_tropen;
-	if (!red_is_a(rp)) {
-		rp->upper->fda.fd[FD_EVENT_B] = rp->upper->fda.fd[FD_EVENT];
-		rp->upper->fda.fd[FD_GENERAL_B] = rp->upper->fda.fd[FD_GENERAL];
-		rp->upper->fda.fd[FD_EVENT] = tmp_efd;
-		rp->upper->fda.fd[FD_GENERAL] = tmp_gfd;
+	} else {
+		red_fds_swap(rp->upper);
+		if (transport_open(rp->trp, rp->iface, &rp->upper->fda, rp->upper->timestamping)) {
+			red_fds_swap(rp->upper);
+			goto no_tropen;
+		}
+		red_fds_swap(rp->upper);
 	}
-	/* if (transport_open(p->red_a->trp, p->red_a->iface, &p->fda, p->timestamping)) */
-		/* goto no_tropen; */
 
 	/* for (i = 0; i < N_TIMER_FDS; i++) { */
 		/* p->fda.fd[FD_FIRST_TIMER + i] = fd[i]; */
@@ -536,8 +545,6 @@ static void red_port_free_foreign_masters(struct red_port *rp)
 
 static void red_port_disable(struct red_port *rp)
 {
-	int tmp_efd, tmp_gfd;
-	
 	if (rp->state == PS_DISABLED || rp->state == PS_FAULTY)
 		return;
 
@@ -554,14 +561,9 @@ static void red_port_disable(struct red_port *rp)
 	if (red_is_a(rp)) {
 		transport_close(rp->trp, &rp->upper->fda);
 	} else {
-		/* Just like when opening, temporarily place B in the location of A */
-		tmp_efd = rp->upper->fda.fd[FD_EVENT];
-		tmp_gfd = rp->upper->fda.fd[FD_GENERAL];
-		rp->upper->fda.fd[FD_EVENT] = rp->upper->fda.fd[FD_EVENT_B];
-		rp->upper->fda.fd[FD_GENERAL] = rp->upper->fda.fd[FD_GENERAL_B];
+		red_fds_swap(rp->upper);
 		transport_close(rp->trp, &rp->upper->fda);
-		rp->upper->fda.fd[FD_EVENT] = tmp_efd;
-		rp->upper->fda.fd[FD_GENERAL] = tmp_gfd;
+		red_fds_swap(rp->upper);
 	}
 	// TODO: Should we close? Then we need to handle in initialize as well
 	/* int anno_fd = red_anno_fd(rp); */
@@ -1077,37 +1079,28 @@ static struct red_port *red_get_active_port(struct port *p)
 
 static int red_port_send(struct red_port *rp, enum transport_event event, struct ptp_message *msg)
 {
-	int tmp_efd, tmp_gfd, cnt;
+	int cnt;
 
 	if (red_is_a(rp)) {
 		cnt = transport_send(rp->trp, &rp->upper->fda, event, msg);
 	} else {
 		/* Temporarily swap around FDs */
-		tmp_efd = rp->upper->fda.fd[FD_EVENT];
-		tmp_gfd = rp->upper->fda.fd[FD_GENERAL];
-		rp->upper->fda.fd[FD_EVENT] = rp->upper->fda.fd[FD_EVENT_B];
-		rp->upper->fda.fd[FD_GENERAL] = rp->upper->fda.fd[FD_GENERAL_B];
+		red_fds_swap(rp->upper);
 		cnt = transport_send(rp->trp, &rp->upper->fda, event, msg);
-		rp->upper->fda.fd[FD_EVENT] = tmp_efd;
-		rp->upper->fda.fd[FD_GENERAL] = tmp_gfd;
+		red_fds_swap(rp->upper);
 	}
 	return cnt;
 }
 static int red_port_peer(struct red_port *rp, enum transport_event event, struct ptp_message *msg)
 {
-	int tmp_efd, tmp_gfd, cnt;
+	int cnt;
 
 	if (red_is_a(rp)) {
 		cnt = transport_peer(rp->trp, &rp->upper->fda, event, msg);
 	} else {
-		/* Temporarily swap around FDs */
-		tmp_efd = rp->upper->fda.fd[FD_EVENT];
-		tmp_gfd = rp->upper->fda.fd[FD_GENERAL];
-		rp->upper->fda.fd[FD_EVENT] = rp->upper->fda.fd[FD_EVENT_B];
-		rp->upper->fda.fd[FD_GENERAL] = rp->upper->fda.fd[FD_GENERAL_B];
+		red_fds_swap(rp->upper);
 		cnt = transport_peer(rp->trp, &rp->upper->fda, event, msg);
-		rp->upper->fda.fd[FD_EVENT] = tmp_efd;
-		rp->upper->fda.fd[FD_GENERAL] = tmp_gfd;
+		red_fds_swap(rp->upper);
 	}
 	return cnt;
 }
