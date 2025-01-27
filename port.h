@@ -377,6 +377,8 @@ int msg_source_equal(struct ptp_message *m1, struct foreign_clock *fc);
 
 void fc_prune(struct foreign_clock *fc);
 
+void port_clear_fda(struct port *p, int count);
+
 void port_write_hw_path_delay(const char *ifname, int ev_fd, Integer64 delay_ns);
 int port_is_red(struct port *p);
 

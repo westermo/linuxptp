@@ -1945,7 +1945,7 @@ static void flush_peer_delay(struct port *p)
 	}
 }
 
-static void port_clear_fda(struct port *p, int count)
+void port_clear_fda(struct port *p, int count)
 {
 	int i;
 

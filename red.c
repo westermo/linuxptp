@@ -52,7 +52,9 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next);
 static enum fsm_event red_switchover(struct red_port *from, enum port_state from_next);
 static void red_dispatch_ports(struct port *p);
 static void red_port_notify_event(struct red_port *rp, enum notification event);
+static void red_port_set_socket_clk_type(struct red_port *rp, int clk_type);
 static void red_hsr_swap_clock_mode(struct port *p);
+static int red_port_fault_timeout(struct red_port *rp, int set);
 
 static void red_fds_swap(struct port *p)
 {
@@ -167,18 +169,11 @@ static void red_link_status(void *ctx, int linkup, int ts_index)
 	/* The PHC index may change even with the same ts_label, e.g. after
 	   failover with VLAN over bond. */
 	interface_get_tsinfo(rp->iface);
+}
 
-	// TODO: Handle in FD_RTNL if we need to swap
-	/* Switch the clock if needed */
-	/* port_change_phc(rp); // TODO ??? */
-
-	/*
-	 * A port going down can affect the BMCA result.
-	 * Force a state decision event.
-	 */
-	// TODO: A RED port going down may not affect SDE
-	/* if (rp->link_status & LINK_DOWN) */
-		/* clock_set_sde(rp->clock, 1); */
+static int red_port_link_status_get(struct red_port *rp)
+{
+	return rp->link_status & LINK_UP;
 }
 
 static int red_link_status_get(struct port *p)
@@ -198,22 +193,29 @@ static enum fsm_event red_port_link_status_event(struct red_port *rp)
 	if (rp_up) {
 		if (rp->state != PS_FAULTY)
 			return EV_NONE;
-		/* pr_err("casan %s %s: Link up", __func__, rp->log_name); */
+		red_port_fault_timeout(rp, 0);
 		/* if (other->state == PS_UNCALIBRATED || other->state == PS_SLAVE) */
 		/* 	red_port_p2p_transition(rp, PS_PASSIVE_SLAVE); */
 		/* else */
 		/* 	red_port_p2p_transition(rp, rp->upper->state); */
-		red_port_p2p_transition(rp, PS_LISTENING);
+		/* red_port_p2p_transition(rp, PS_LISTENING); */
+		rp->state = PS_INITIALIZING;
 		if (rp->upper->state == PS_FAULTY)
+			/* Triggers a red_dispatch() to clear FAULTY
+			 * and initialize ports.
+			 */
 			return EV_FAULT_CLEARED;
 		else
 			red_dispatch_ports(rp->upper);
 	} else if (rp_down) {
 		red_port_p2p_transition(rp, PS_FAULTY);
 		if (other->state == PS_FAULTY) {
+			/* Triggers a red_dispatch() to set RED to
+			 * FAULTY.
+			*/
 			return EV_FAULT_DETECTED;
 		} else {
-			red_dispatch_ports(rp->upper); //red_switchover(rp, PS_FAULTY);
+			red_dispatch_ports(rp->upper);
 			return EV_NONE;
 		}
 	}
@@ -237,6 +239,7 @@ static void red_port_set_hw_path_delay(struct red_port *rp)
 		+ (rp->tx_timestamp_offset >> 16);
 
 	/* Just use the event file descriptor */
+	/* pr_err("casan %s: writing pdelay %"PRId64, __func__, value);  */
 	port_write_hw_path_delay(rp->name, rp->upper->fda.fd[red_event_fd(rp)], value);
 }
 
@@ -331,6 +334,7 @@ static void red_port_init_rtnl(struct red_port *rp)
 
 static int red_port_initialize(struct red_port *rp)
 {
+	pr_err("casan %s: initializing %s", __func__, rp->log_name);
 	if (red_is_a(rp)) {
 		if (transport_open(rp->trp, rp->iface, &rp->upper->fda, rp->upper->timestamping))
 			goto no_tropen;
@@ -343,6 +347,14 @@ static int red_port_initialize(struct red_port *rp)
 		}
 		red_fds_swap(rp->upper);
 	}
+
+	/* If current clock type is TC then we have to change since
+	 * transport_open will have initialized as BC */
+	if (clock_type(rp->upper->clock) == CLOCK_TYPE_BOUNDARY
+	    && rp->upper->curr_clktype == HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK) {
+		red_port_set_socket_clk_type(rp, HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK);
+	}
+
 
 	/* for (i = 0; i < N_TIMER_FDS; i++) { */
 		/* p->fda.fd[FD_FIRST_TIMER + i] = fd[i]; */
@@ -367,8 +379,13 @@ static int red_port_initialize(struct red_port *rp)
 	clock_fda_changed(rp->upper->clock);
 	return 0;
 no_tmo:
-	// TODO: swap FDs if necessary
-	transport_close(rp->trp, &rp->upper->fda);
+	if (red_is_a(rp)) {
+		transport_close(rp->trp, &rp->upper->fda);
+	} else {
+		red_fds_swap(rp->upper);
+		transport_close(rp->trp, &rp->upper->fda);
+		red_fds_swap(rp->upper);
+	}
 no_tropen:
 	return -1;
 /* 	for (i = 0; i < N_TIMER_FDS; i++) { */
@@ -490,8 +507,6 @@ int red_initialize(struct port *p)
 	return 0;
 
 no_tmo:
-	// TODO: swap FDs if necessary
-	transport_close(p->trp, &p->fda);
 /* no_tropen: */
 no_timers:
 	for (i = 0; i < N_TIMER_FDS; i++) {
@@ -545,13 +560,20 @@ static void red_port_free_foreign_masters(struct red_port *rp)
 
 static void red_port_disable(struct red_port *rp)
 {
-	if (rp->state == PS_DISABLED || rp->state == PS_FAULTY)
-		return;
+	/* int anno_fd = red_anno_fd(rp); */
 
+	if (rp->state == PS_DISABLED || rp->state == PS_FAULTY) {
+		pr_err("casan %s: already disabled [%s]", __func__, rp->log_name);
+		return;
+	}
+
+	pr_err("casan %s: disabling [%s]", __func__, rp->log_name);
 	/* tc_flush(p); */
 	/* flush_last_sync(p); */
 	/* flush_delay_req(p); */
 	red_port_flush_peer_delay(rp);
+
+	port_clr_tmo(rp->upper->fda.fd[red_anno_fd(rp)]);
 
 	// TODO: Do we need to signal something? This does not feel like a perfect solution
 	rp->upper->best = red_other_port(rp)->best;
@@ -560,13 +582,19 @@ static void red_port_disable(struct red_port *rp)
 	
 	if (red_is_a(rp)) {
 		transport_close(rp->trp, &rp->upper->fda);
+		rp->upper->fda.fd[FD_EVENT] = -1;
+		rp->upper->fda.fd[FD_GENERAL] = -1;
 	} else {
 		red_fds_swap(rp->upper);
 		transport_close(rp->trp, &rp->upper->fda);
 		red_fds_swap(rp->upper);
+		rp->upper->fda.fd[FD_EVENT_B] = -1;
+		rp->upper->fda.fd[FD_GENERAL_B] = -1;
 	}
+	clock_fda_changed(rp->clock);
 	// TODO: Should we close? Then we need to handle in initialize as well
 	/* int anno_fd = red_anno_fd(rp); */
+	/* close(rp->upper->fda.fd[anno_fd]); */
 	/* close(rp->upper->fda.fd[anno_fd]); */
 	/* red_port_clear_fda(rp); */
 
@@ -579,6 +607,7 @@ void red_disable(struct port *p)
 	int i;
 
 	p->best = NULL;
+	pr_err("casan %s: Disabling RED", __func__);
 	/* free_foreign_masters(p); */
 	
 	for (i = 0; i < N_TIMER_FDS; i++) {
@@ -592,9 +621,10 @@ void red_disable(struct port *p)
 	red_clear_fda(p, FD_RTNL_B);
 	clock_fda_changed(p->clock);
 
-	/* red_port_disable(p->red_a); */
-	/* red_port_disable(p->red_b); */
+	red_port_disable(p->red_a);
+	red_port_disable(p->red_b);
 
+	port_clear_fda(p, FD_RTNL);
 }
 static int red_set_delay_tmo(struct port *p)
 {
@@ -727,6 +757,8 @@ static int red_state_update(struct port *p, enum fsm_event event, int mdiff)
 			event = EV_INIT_COMPLETE;
 		}
 		next = p->state_machine(next, event, 0);
+		p->red_a->state = PS_INITIALIZING;
+		p->red_b->state = PS_INITIALIZING;
 	}
 
 	if (mdiff) {
@@ -741,49 +773,6 @@ static int red_state_update(struct port *p, enum fsm_event event, int mdiff)
 	}
 
 	return 0;
-}
-
-static void red_switch_phc(struct port *p, int phc_index)
-{
-	struct red_port *rp = phc_index == p->red_a->phc_index ? p->red_a : p->red_b;
-
-	if (p->phc_index == phc_index)
-		return;
-
-	if (p->jbod && phc_index >= 0 ) {
-		p->phc_index = phc_index;
-		if (clock_switch_phc(p->clock, p->phc_index)) {
-			p->last_fault_type = FT_SWITCH_PHC;
-			port_dispatch(p, EV_FAULT_DETECTED, 0);
-		}
-		clock_sync_interval(p->clock, p->log_sync_interval);
-		struct tsproc *tsp = rp->tsproc;
-		clock_peer_delay(p->clock, rp->peer_delay,
-				 tsproc_get_t1(tsp), tsproc_get_t2(tsp), rp->nrate.ratio);
-	}
-}
-
-static enum fsm_event red_switchover(struct red_port *from, enum port_state from_next)
-{
-	struct red_port *other = red_other_port(from);
-	enum port_state prev = from->state;
-
-	pr_err("casan %s", __func__);
-	if (red_port_is_slave(from) && red_port_is_slave_backup(other)) {
-		red_port_p2p_transition(from, from_next);
-		red_port_p2p_transition(other, prev);
-		red_switch_phc(from->upper, other->phc_index);
-		/* from->upper->phc_index = other->phc_index; */
-		/* if (from->upper->jbod && other->phc_index >= 0 ) { */
-		/* 	if (clock_switch_phc(from->clock, other->phc_index)) { */
-		/* 		/\* rp->last_fault_type = FT_SWITCH_PHC; *\/ */
-		/* 		/\* port_dispatch(rp->upper, EV_FAULT_DETECTED, 0); *\/ */
-		/* 		return EV_FAULT_DETECTED; */
-		/* 	} */
-		/* 	clock_sync_interval(from->clock, from->upper->log_sync_interval); */
-		/* } */
-	}
-	return EV_NONE;
 }
 
 /* static void red_set_slave_ports(struct port *p, enum port_state next) */
@@ -850,6 +839,10 @@ static struct red_port *red_compute_slave_port(struct port *p)
 
 static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 {
+	if (rp->state == next)
+		return;
+
+	pr_err("casan %s: %s", __func__, rp->log_name);
 	port_clr_tmo(rp->upper->fda.fd[red_anno_fd(rp)]);
 
 	switch (next) {
@@ -861,7 +854,7 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 		/* Should only happen if both RED ports are FAULTY and we trigger
 		 * dispatch on EV_FAULT_DETECTED */
 		/* red_disable(p); */
-		/* red_port_disable(rp); */
+		red_port_disable(rp);
 		break;
 	case PS_LISTENING:
 		red_port_try_set_anno_tmo(rp);
@@ -945,8 +938,6 @@ static void red_p2p_transition(struct port *p, enum port_state next)
 		/* red_port_try_set_anno_tmo(p->red_b); */
 		break;
 	case PS_UNCALIBRATED:
-		// TODO: Figure out which port becomes PASSIVE_SLAVE and set its state
-		// and switch to that PHC.
 		/* flush_last_sync(p); */
 		/* red_port_flush_peer_delay(p->red_a); */
 		/* red_port_flush_peer_delay(p->red_b); */
@@ -1967,6 +1958,7 @@ static int red_port_process_announce(struct red_port *rp, struct ptp_message *m)
 		return result;
 	}
 
+	rp->anno_timed_out = false;
 	switch (rp->state) {
 	case PS_INITIALIZING:
 	case PS_FAULTY:
@@ -2028,23 +2020,6 @@ static enum fsm_event red_port_timeout_slave(struct red_port *rp)
 		
 
 	return red_switchover(rp, PS_PASSIVE_SLAVE);
-	// TODO: Perform switchover
-	/* if (red_port_is_slave(rp) && red_port_is_slave_backup(other)) { */
-	/* 	/\* red_port_show_transition(rp, PS_PASSIVE_SLAVE); *\/ */
-	/* 	/\* red_port_show_transition(other, rp->state); *\/ */
-	/* 	red_port_p2p_transition(other, rp->state); */
-	/* 	red_port_p2p_transition(rp, PS_PASSIVE_SLAVE); */
-	/* 	rp->upper->phc_index = other->phc_index; */
-	/* 	if (rp->upper->jbod && other->phc_index >= 0 ) { */
-	/* 		if (clock_switch_phc(rp->clock, other->phc_index)) { */
-	/* 			/\* rp->last_fault_type = FT_SWITCH_PHC; *\/ */
-	/* 			/\* port_dispatch(rp->upper, EV_FAULT_DETECTED, 0); *\/ */
-	/* 			return EV_FAULT_DETECTED; */
-	/* 		} */
-	/* 		clock_sync_interval(rp->clock, rp->upper->log_sync_interval); */
-	/* 	} */
-	/* } */
-	/* return EV_NONE; */
 }
 
 static enum fsm_event red_port_anno_tmo(struct red_port *rp, int fd_index)
@@ -2142,7 +2117,6 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 	/* 	return unicast_client_timer(p) ? EV_FAULT_DETECTED : EV_NONE; */
 
 	case FD_RTNL:
-		/* TODO: Handle for port A. Common port inherits from both combined */
 		pr_err("%s: received link status notification", p->red_a->log_name);
 		rtnl_link_status(fd, p->red_a->name, red_link_status, p->red_a);
 		return red_port_link_status_event(p->red_a);
@@ -2154,7 +2128,6 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 		/* else */
 		/* 	return EV_NONE; */
 	case FD_RTNL_B:
-		/* TODO: Handle for port B. Common port inherits from both combined */
 		pr_err("%s: received link status notification", p->red_b->log_name);
 		rtnl_link_status(fd, p->red_b->name, red_link_status, p->red_b);
 		return red_port_link_status_event(p->red_b);
@@ -2167,17 +2140,28 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 	/* 		return EV_NONE; */
 	case FD_FAULT_RED_A:
 		pr_err("TODO: implement FD_FAULT_RED_A");
+		red_port_fault_timeout(p->red_a, 0);
+		if (!red_port_link_status_get(p->red_a))
+			return EV_NONE;
+		p->red_a->state = PS_INITIALIZING;
 		if (p->state == PS_FAULTY)
 			return EV_FAULT_CLEARED;
+		else
+			red_dispatch_ports(p);
 		break;
 	case FD_FAULT_RED_B:
 		pr_err("TODO: implement FD_FAULT_RED_B");
+		red_port_fault_timeout(p->red_b, 0);
+		if (!red_port_link_status_get(p->red_b))
+			return EV_NONE;
+		p->red_b->state = PS_INITIALIZING;
 		if (p->state == PS_FAULTY)
 			return EV_FAULT_CLEARED;
+		else
+			red_dispatch_ports(p);
 		break;
 	}
 
-	/* TODO: Handle FD_EVENT_B, FD_GENERAL_B. Maybe FD_ANNOUNCE_B */
 	struct red_port *rp = NULL;
 	
 	if (fd_index == FD_EVENT || fd_index == FD_GENERAL)
@@ -2243,6 +2227,7 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 			event = EV_FAULT_DETECTED;
 		break;
 	case PDELAY_RESP:
+		/* Don't declare fault if a single port has problem */
 		if (red_port_process_pdelay_resp(rp, msg))
 			event = EV_FAULT_DETECTED;
 		break;
@@ -2553,19 +2538,16 @@ struct port *red_open(const char *phc_device,
 	return p;
 
 err_tsproc:
-	pr_err("casan 1");
 	if (red_a->tsproc)
 		tsproc_destroy(red_a->tsproc);
 	if (red_b->tsproc)
 		tsproc_destroy(red_b->tsproc);
 err_transport:
-	pr_err("casan 2");
 	if (red_a->trp)
 		transport_destroy(red_a->trp);
 	if (red_b->trp)
 		transport_destroy(red_b->trp);
 err_log_name:
-	pr_err("casan 3");
 	if (p->log_name)
 		free(p->log_name);
 	if (red_a->log_name)
@@ -2573,10 +2555,8 @@ err_log_name:
 	if (red_b->log_name)
 		free(red_b->log_name);
 err_iface:
-	pr_err("casan 4");
 	free(interface);
 err_red:
-	pr_err("casan 5");
 	if (red_a)
 		free(red_a);
 	if (red_b)
@@ -2633,66 +2613,108 @@ void red_close(struct port *p)
 	free(p);
 }
 
+static void red_switch_phc(struct port *p, int phc_index)
+{
+	struct red_port *rp = phc_index == p->red_a->phc_index ? p->red_a : p->red_b;
+
+	if (p->phc_index == phc_index)
+		return;
+
+	if (p->jbod && phc_index >= 0 ) {
+		p->phc_index = phc_index;
+		if (clock_switch_phc(p->clock, p->phc_index)) {
+			p->last_fault_type = FT_SWITCH_PHC;
+			port_dispatch(p, EV_FAULT_DETECTED, 0);
+		}
+		clock_sync_interval(p->clock, p->log_sync_interval);
+		struct tsproc *tsp = rp->tsproc;
+		clock_peer_delay(p->clock, rp->peer_delay,
+				 tsproc_get_t1(tsp), tsproc_get_t2(tsp), rp->nrate.ratio);
+	}
+}
+
+static enum fsm_event red_switchover(struct red_port *from, enum port_state from_next)
+{
+	struct red_port *other = red_other_port(from);
+	enum port_state prev = from->state;
+
+	pr_err("casan %s", __func__);
+	if (red_port_is_slave(from) && red_port_is_slave_backup(other)) {
+		red_port_p2p_transition(from, from_next);
+		red_port_p2p_transition(other, prev);
+		red_switch_phc(from->upper, other->phc_index);
+		/* from->upper->phc_index = other->phc_index; */
+		/* if (from->upper->jbod && other->phc_index >= 0 ) { */
+		/* 	if (clock_switch_phc(from->clock, other->phc_index)) { */
+		/* 		/\* rp->last_fault_type = FT_SWITCH_PHC; *\/ */
+		/* 		/\* port_dispatch(rp->upper, EV_FAULT_DETECTED, 0); *\/ */
+		/* 		return EV_FAULT_DETECTED; */
+		/* 	} */
+		/* 	clock_sync_interval(from->clock, from->upper->log_sync_interval); */
+		/* } */
+	}
+	return EV_NONE;
+}
+
 static void red_dispatch_ports(struct port *p)
 {
 	struct red_port *slave = red_compute_slave_port(p);
 	struct red_port *rpa = p->red_a;
 	struct red_port *rpb = p->red_b;
-	enum port_state state_a = PS_FAULTY;
-	enum port_state state_b = PS_FAULTY;
+	enum port_state next_a = PS_FAULTY;
+	enum port_state next_b = PS_FAULTY;
 	int phc_index = p->phc_index;
 	
-	/* if (slave == NULL) { */
-	/* 	pr_err("casan: No best master on RED"); */
-	/* 	red_port_p2p_transition(rpa, PS_MASTER); */
-	/* 	red_port_p2p_transition(rpb, PS_MASTER); */
-	/* 	return; */
-	/* } */
+	if (rpa->state == PS_INITIALIZING && p->state != PS_FAULTY && p->state != PS_DISABLED) {
+		red_port_initialize(rpa);
+	}
+	if (rpb->state == PS_INITIALIZING && p->state != PS_FAULTY && p->state != PS_DISABLED) {
+		red_port_initialize(rpb);
+	}
 	
 	pr_err("casan %s: State %s", __func__, ps_str[p->state]);
+	/* red_port's have their settings updated later in red_port_p2p_transition() */
 	switch (p->state) {
 	case PS_INITIALIZING:
 		break;
 	case PS_FAULTY:
 	case PS_DISABLED:
-		/* red_port_disable(rpa); */
-		/* red_port_disable(rpb); */
-		state_a = p->state;
-		state_b = p->state;
+		next_a = p->state;
+		next_b = p->state;
 		break;
 	case PS_LISTENING:
-		state_a = p->state;
-		state_b = p->state;
+		next_a = p->state;
+		next_b = p->state;
 		break;
 	case PS_PRE_MASTER:
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
-		state_a = p->state;
-		state_b = p->state;
+		next_a = p->state;
+		next_b = p->state;
 		break;
 	case PS_PASSIVE:
-		state_a = p->state;
-		state_b = p->state;
+		next_a = p->state;
+		next_b = p->state;
 		break;
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
-		pr_err("Selected %s for slave", slave->log_name);
+		pr_info("Selected %s for slave", slave->log_name);
 		if (red_port_up(rpa) && red_port_up(rpb)) {
 			pr_err("casan: both ports up");
-			state_a = slave == rpa ? p->state : PS_PASSIVE_SLAVE;
-			state_b = slave == rpb ? p->state : PS_PASSIVE_SLAVE;
+			next_a = slave == rpa ? p->state : PS_PASSIVE_SLAVE;
+			next_b = slave == rpb ? p->state : PS_PASSIVE_SLAVE;
 			phc_index = slave == rpa ? rpa->phc_index : rpb->phc_index;
-			if ((state_a == PS_SLAVE && rpb->state == PS_SLAVE) || (state_b == PS_SLAVE && rpa->state == PS_SLAVE)) {
+			if ((next_a == PS_SLAVE && rpb->state == PS_SLAVE) || (next_b == PS_SLAVE && rpa->state == PS_SLAVE)) {
 				pr_err("casan: don't switch ports if one is already active");
 				return;
 			}
 		} else if (red_port_up(rpa)) {
 			pr_err("casan: only A port up");
-			state_a = p->state;
+			next_a = p->state;
 			phc_index = rpa->phc_index;
 		} else if (red_port_up(rpb)) {
 			pr_err("casan: only B port up");
-			state_b = p->state;
+			next_b = p->state;
 			phc_index = rpb->phc_index;
 		} else {
 			pr_err("RED interface should not be up when both ports are down");
@@ -2703,16 +2725,10 @@ static void red_dispatch_ports(struct port *p)
 		break;
 	};
 
-	/* if (slave == rpa) { */
-	/* 	if (!red_port_is_slave(rpa) && !red_port_is_slave_backup(rpa)) { */
-	/* 		state_a = PS_UNCALIBRATED; */
-	/* 	} */
-	/* } */
-
         if (red_port_up(rpa))
-		red_port_p2p_transition(rpa, state_a);
+		red_port_p2p_transition(rpa, next_a);
         if (red_port_up(rpb))
-		red_port_p2p_transition(rpb, state_b);
+		red_port_p2p_transition(rpb, next_b);
 
 	if (p->state == PS_UNCALIBRATED || p->state == PS_SLAVE)
 		red_switch_phc(p, phc_index);
