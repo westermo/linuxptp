@@ -2457,3 +2457,22 @@ bool clock_is_hsr_or_prp(struct clock *c)
 {
 	return clock_is_hsr(c) || clock_is_prp(c);
 }
+
+int clock_switch_phc_keep_servo(struct clock *c, int phc_index)
+{
+	clockid_t clkid;
+	char phc[32];
+
+	snprintf(phc, sizeof(phc), "/dev/ptp%d", phc_index);
+	clkid = phc_open(phc);
+	if (clkid == CLOCK_INVALID) {
+		pr_err("Switching PHC, failed to open %s: %m", phc);
+		return -1;
+	}
+	phc_close(c->clkid);
+	c->clkid = clkid;
+
+	pr_info("Switched to /dev/ptp%d as PTP clock", phc_index);
+
+	return 0;
+}
