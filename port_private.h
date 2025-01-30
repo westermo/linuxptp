@@ -72,6 +72,14 @@ struct onestep_conversion_info {
 	bool valid;
 };
 
+struct redundant_bc_info {
+	/* Using clock_gettime since the Announce we compare it to won't have a PHC timestamp */
+	struct timespec last_sync;
+	struct PortIdentity sync_pid;
+	struct timespec last_anno;
+	struct PortIdentity anno_pid;
+};
+
 struct port {
 	LIST_ENTRY(port) list;
 	const char *name;
@@ -186,6 +194,7 @@ struct port {
 	int egress_vlan_id;
 	int egress_vlan_prio;
 	int errorCounter;
+	struct redundant_bc_info redundant_bc_info;
 };
 
 #define portnum(p) (p->portIdentity.portNumber)

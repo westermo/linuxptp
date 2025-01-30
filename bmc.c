@@ -126,6 +126,65 @@ int dscmp(struct dataset *a, struct dataset *b)
 	return diff < 0 ? A_BETTER : B_BETTER;
 }
 
+static int dscmp2_no_id(struct dataset *a, struct dataset *b)
+{
+	unsigned int A = a->stepsRemoved, B = b->stepsRemoved;
+
+	if (A + 1 < B)
+		return A_BETTER;
+	if (B + 1 < A)
+		return B_BETTER;
+
+	return 0;
+}
+
+/* If GM is the same, check stepsRemoved. Otherwise, return 0 */
+int dscmp_no_id(struct dataset *a, struct dataset *b)
+{
+	int diff;
+
+	if (a == b)
+		return 0;
+	if (a && !b)
+		return A_BETTER;
+	if (b && !a)
+		return B_BETTER;
+
+	diff = memcmp(&a->identity, &b->identity, sizeof(a->identity));
+
+	if (!diff)
+		return dscmp2_no_id(a, b);
+
+	if (a->priority1 < b->priority1)
+		return A_BETTER;
+	if (a->priority1 > b->priority1)
+		return B_BETTER;
+
+	if (a->quality.clockClass < b->quality.clockClass)
+		return A_BETTER;
+	if (a->quality.clockClass > b->quality.clockClass)
+		return B_BETTER;
+
+	if (a->quality.clockAccuracy < b->quality.clockAccuracy)
+		return A_BETTER;
+	if (a->quality.clockAccuracy > b->quality.clockAccuracy)
+		return B_BETTER;
+
+	if (a->quality.offsetScaledLogVariance <
+	    b->quality.offsetScaledLogVariance)
+		return A_BETTER;
+	if (a->quality.offsetScaledLogVariance >
+	    b->quality.offsetScaledLogVariance)
+		return B_BETTER;
+
+	if (a->priority2 < b->priority2)
+		return A_BETTER;
+	if (a->priority2 > b->priority2)
+		return B_BETTER;
+
+	return diff < 0 ? A_BETTER : B_BETTER;
+}
+
 enum port_state bmc_state_decision(struct clock *c, struct port *r,
 				   int (*compare)(struct dataset *a, struct dataset *b))
 {

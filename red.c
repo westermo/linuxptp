@@ -29,6 +29,7 @@
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
 #include <sys/ioctl.h>
+#include <time.h>
 
 #include "bmc.h"
 #include "clock.h"
@@ -504,6 +505,9 @@ int red_initialize(struct port *p)
 		goto no_tmo;
 
 	clock_fda_changed(p->clock);
+
+	memset(&p->redundant_bc_info, 0, sizeof(struct redundant_bc_info));
+
 	return 0;
 
 no_tmo:
@@ -892,6 +896,7 @@ static void red_p2p_transition(struct port *p, enum port_state next)
 		break;
 	case PS_PRE_MASTER:
 		red_set_qualification_tmo(p);
+		memset(&p->redundant_bc_info, 0, sizeof(struct redundant_bc_info));
 		break;
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
@@ -899,6 +904,7 @@ static void red_p2p_transition(struct port *p, enum port_state next)
 			set_tmo_log(p->fda.fd[FD_MANNO_TIMER], 1, -10); /*~1ms*/
 		}
 		red_set_sync_tx_tmo(p);
+		memset(&p->redundant_bc_info, 0, sizeof(struct redundant_bc_info));
 		break;
 	case PS_PASSIVE:
 		/* red_port_try_set_anno_tmo(p->red_a); */
@@ -914,6 +920,7 @@ static void red_p2p_transition(struct port *p, enum port_state next)
 		/* red_port_try_set_anno_tmo(p->red_a); */
 		/* red_port_try_set_anno_tmo(p->red_b); */
 		/* red_set_slave_ports(p, next); */
+		memset(&p->redundant_bc_info, 0, sizeof(struct redundant_bc_info));
 		break;
 	case PS_PASSIVE_SLAVE:
 		/* port_set_announce_tmo(p); // TODO ??? */
@@ -936,16 +943,72 @@ static void red_p2p_transition(struct port *p, enum port_state next)
 	/* } */
 }
 
+static int cmp_timespec(struct timespec a, struct timespec b)
+{
+	if (a.tv_sec > b.tv_sec)
+		return 1;
+	else if (b.tv_sec > a.tv_sec)
+		return -1;
+	else if (a.tv_nsec > b.tv_nsec)
+		return 1;
+	else if (b.tv_nsec > a.tv_nsec)
+		return -1;
+	else
+		return 0;
+}
+
+/* Other active BC exists in ring. Go to PASSIVE */
+static enum fsm_event red_active_bc_exists(struct port *p, enum fsm_event event)
+{
+	struct timespec last_sync = p->redundant_bc_info.last_sync;
+	struct timespec last_anno = p->redundant_bc_info.last_anno;
+	struct dataset *clock_best_ds = clock_best_foreign(p->clock);
+	struct dataset *red_best_ds = &p->best->dataset;
+	struct timespec now;
+
+	if (clock_type(p->clock) != CLOCK_TYPE_BOUNDARY)
+		return event;
+	if (event != EV_QUALIFICATION_TIMEOUT_EXPIRES)
+		return event;
+
+	/* Condition to enter PASSIVE after PRE_MASTER
+	 * 1. There is another MASTER on the ring. (A)
+	 * 2. The same MASTER has recently transmitted Sync (within 2 seconds)
+	 *    and Announce. Meaning there is a master actively
+	 *    transmitting. (B, C, D)
+	 * 3. The Clock (i.e. interlink port) has better
+	 *    quality than on the ring. Don't compare PID to
+	 *    avoid overriding based on fallback identity. (E)
+	 * 4. The active master has the same GM identity. (F)
+	 * 5. The most recent Sync is that of the active ring master. (G)
+	 *
+	 * The checks below will exit if any of the above conditions are false.
+	 */
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+	last_sync.tv_sec += 2;
+	last_anno.tv_sec += 2;
+
+	if (!red_best_ds)
+		return event; // A
+	if (cmp_timespec(last_sync, now) < 0)
+		return event; // B
+	if (cmp_timespec(last_anno, now) < 0)
+		return event; // C
+	if(!pid_eq(&p->redundant_bc_info.sync_pid, &p->redundant_bc_info.anno_pid))
+		return event; // D
+	if(!(dscmp_no_id(red_best_ds, clock_best_foreign(p->clock)) >= B_BETTER))
+		return event; // E
+	if (!cid_eq(&red_best_ds->identity, &clock_best_ds->identity))
+		return event; // F
+	if (!pid_eq(&p->redundant_bc_info.sync_pid, &red_best_ds->sender))
+		return event; // G
+
+	return EV_RS_PASSIVE;
+}
+
 static void red_dispatch(struct port *p, enum fsm_event event, int mdiff)
 {
-	/* struct red_port *red_a = p->red_a; */
-	/* struct red_port *red_b = p->red_b; */
-
-	/* if (clock_slave_only(p->clock)) { */
-	/* 	if (event == EV_RS_GRAND_MASTER) { */
-	/* 		port_slave_priority_warning(p); */
-	/* 	} */
-	/* } */
+	event = red_active_bc_exists(p, event);
 
 	if (!red_state_update(p, event, mdiff)) {
 		return;
@@ -1471,19 +1534,25 @@ static void red_port_synchronize(struct red_port *rp,
 static void red_port_process_sync(struct red_port *rp, struct ptp_message *m)
 {
 	/* enum syfu_event event; */
+
 	switch (rp->state) {
 	case PS_INITIALIZING:
 	case PS_FAULTY:
 	case PS_DISABLED:
+		return;
 	case PS_LISTENING:
 	case PS_PRE_MASTER:
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
 	case PS_PASSIVE:
 	case PS_PASSIVE_SLAVE:
+		clock_gettime(CLOCK_MONOTONIC_RAW, &rp->upper->redundant_bc_info.last_sync);
+		rp->upper->redundant_bc_info.sync_pid = m->header.sourcePortIdentity;
 		return;
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
+		clock_gettime(CLOCK_MONOTONIC_RAW, &rp->upper->redundant_bc_info.last_sync);
+		rp->upper->redundant_bc_info.sync_pid = m->header.sourcePortIdentity;
 		break;
 	}
 
@@ -1929,6 +1998,9 @@ static int red_port_process_announce(struct red_port *rp, struct ptp_message *m)
 			rp->log_name);
 		return result;
 	}
+
+	clock_gettime(CLOCK_MONOTONIC_RAW, &rp->upper->redundant_bc_info.last_anno);
+	rp->upper->redundant_bc_info.anno_pid = m->header.sourcePortIdentity;
 
 	switch (rp->state) {
 	case PS_INITIALIZING:
