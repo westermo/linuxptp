@@ -57,6 +57,16 @@ static void red_port_set_socket_clk_type(struct red_port *rp, int clk_type);
 static void red_hsr_swap_clock_mode(struct port *p);
 static int red_port_fault_timeout(struct red_port *rp, int set);
 
+static bool red_is_boundary(struct port *p)
+{
+	return clock_type(p->clock) == CLOCK_TYPE_BOUNDARY;
+}
+
+static bool red_is_transparent(struct port *p)
+{
+	return clock_type(p->clock) == CLOCK_TYPE_P2P;
+}
+
 static void red_fds_swap(struct port *p)
 {
 	int tmp_efd = 0;
@@ -227,7 +237,7 @@ static void red_port_set_hw_path_delay(struct red_port *rp)
 {
 	Integer64 value;
 
-	if (clock_is_prp(rp->clock) && clock_type(rp->clock) == CLOCK_TYPE_BOUNDARY)
+	if (clock_is_prp(rp->clock) && red_is_boundary(rp->upper))
 		return;
 	/* if (!clock_is_tc_hw_fwd(p->clock)) // && (!clock_is_hsr(p->clock) || !port_get_paired(p))) */
 		/* return; */
@@ -351,8 +361,7 @@ static int red_port_initialize(struct red_port *rp)
 
 	/* If current clock type is TC then we have to change since
 	 * transport_open will have initialized as BC */
-	if (clock_type(rp->upper->clock) == CLOCK_TYPE_BOUNDARY
-	    && rp->upper->curr_clktype == HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK) {
+	if (red_is_boundary(rp->upper) && rp->upper->curr_clktype == HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK) {
 		red_port_set_socket_clk_type(rp, HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK);
 	}
 
@@ -737,6 +746,15 @@ static int red_state_update(struct port *p, enum fsm_event event, int mdiff)
 {
 	enum port_state next = p->state_machine(p->state, event, mdiff);
 
+	/* The commented code below would only be relevant if we
+	 * allowed redundant TC via HSR-PRP. Since we follow IEC
+	 * 62439-3:2016, it is explicitly "not recommended and not
+	 * further specified".
+	 */
+	/* TC should never be PASSIVE */
+	/* if (red_is_transparent(p) && next == PS_PASSIVE) */
+		/* next = PS_MASTER; */
+
 	if (PS_FAULTY == next) {
 		struct fault_interval i;
 		fault_interval(p, last_fault_type(p), &i);
@@ -867,12 +885,6 @@ static void red_port_fault(struct red_port *rp)
 
 static void red_p2p_transition(struct port *p, enum port_state next)
 {
-	/* struct red_port *selected = NULL; */
-	/* struct red_port *red_a = p->red_a; */
-	/* struct red_port *red_b = p->red_b; */
-
-	/* port_clr_tmo(p->fda.fd[FD_ANNOUNCE_TIMER]); */
-	/* port_clr_tmo(p->fda.fd[FD_ANNOUNCE_TIMER_B]); */
 	port_clr_tmo(p->fda.fd[FD_SYNC_RX_TIMER]);
 	/* Leave FD_DELAY_TIMER running. */
 	port_clr_tmo(p->fda.fd[FD_QUALIFICATION_TIMER]);
@@ -890,8 +902,6 @@ static void red_p2p_transition(struct port *p, enum port_state next)
 		red_disable(p);
 		break;
 	case PS_LISTENING:
-		/* red_port_try_set_anno_tmo(p->red_a); */
-		/* red_port_try_set_anno_tmo(p->red_b); */
 		red_set_delay_tmo(p);
 		break;
 	case PS_PRE_MASTER:
@@ -900,47 +910,23 @@ static void red_p2p_transition(struct port *p, enum port_state next)
 		break;
 	case PS_MASTER:
 	case PS_GRAND_MASTER:
-		if (!p->inhibit_announce) {
-			set_tmo_log(p->fda.fd[FD_MANNO_TIMER], 1, -10); /*~1ms*/
+		if (red_is_boundary(p)) {
+			if (!p->inhibit_announce) {
+				set_tmo_log(p->fda.fd[FD_MANNO_TIMER], 1, -10); /*~1ms*/
+			}
+			red_set_sync_tx_tmo(p);
 		}
-		red_set_sync_tx_tmo(p);
 		memset(&p->redundant_bc_info, 0, sizeof(struct redundant_bc_info));
 		break;
 	case PS_PASSIVE:
-		/* red_port_try_set_anno_tmo(p->red_a); */
-		/* red_port_try_set_anno_tmo(p->red_b); */
 		break;
 	case PS_UNCALIBRATED:
-		/* flush_last_sync(p); */
-		/* red_port_flush_peer_delay(p->red_a); */
-		/* red_port_flush_peer_delay(p->red_b); */
-		/* fall through */
 	case PS_SLAVE:
-		/* selected = red_compute_slave_port(p); */
-		/* red_port_try_set_anno_tmo(p->red_a); */
-		/* red_port_try_set_anno_tmo(p->red_b); */
-		/* red_set_slave_ports(p, next); */
 		memset(&p->redundant_bc_info, 0, sizeof(struct redundant_bc_info));
 		break;
 	case PS_PASSIVE_SLAVE:
-		/* port_set_announce_tmo(p); // TODO ??? */
 		break;
 	};
-	/* if (next != PS_UNCALIBRATED && next != PS_SLAVE && next != PS_FAULTY) { */
-		/* red_port_set_state(p->red_a, next); */
-		/* red_port_set_state(p->red_b, next); */
-	/* } */
-	/* if (selected) { */
-	/* 	pr_err("casan %s: selected %s", __func__, selected->log_name); */
-	/* 	red_port_p2p_transition(selected, next); */
-	/* 	struct red_port *other = red_other_port(selected); */
-	/* 	if (red_port_up(other)) */
-	/* 		red_port_p2p_transition(other, PS_PASSIVE_SLAVE); */
-	/* 	red_switch_phc(p, selected->phc_index); */
-	/* } else { */
-	/* 	red_port_p2p_transition(p->red_a, next); */
-	/* 	red_port_p2p_transition(p->red_b, next); */
-	/* } */
 }
 
 static int cmp_timespec(struct timespec a, struct timespec b)
@@ -966,7 +952,7 @@ static enum fsm_event red_active_bc_exists(struct port *p, enum fsm_event event)
 	struct dataset *red_best_ds = &p->best->dataset;
 	struct timespec now;
 
-	if (clock_type(p->clock) != CLOCK_TYPE_BOUNDARY)
+	if (red_is_transparent(p))
 		return event;
 	if (event != EV_QUALIFICATION_TIMEOUT_EXPIRES)
 		return event;
@@ -2395,10 +2381,10 @@ struct port *red_open(const char *phc_device,
 	switch (type) {
 	case CLOCK_TYPE_ORDINARY:
 	case CLOCK_TYPE_BOUNDARY:
-		p->dispatch = red_dispatch;
-		p->event = red_event;
-		break;
 	case CLOCK_TYPE_P2P:
+		p->dispatch = red_dispatch;
+		p->event    = red_event;
+		break;
 	case CLOCK_TYPE_E2E:
 	case CLOCK_TYPE_MANAGEMENT:
 		pr_err("Unsupported clock type for RED interface");
@@ -2574,7 +2560,7 @@ struct port *red_open(const char *phc_device,
 	}
 	p->errorCounter = 0;
 
-	if (clock_type(p->clock) == CLOCK_TYPE_BOUNDARY)
+	if (red_is_boundary(p))
 		p->curr_clktype = HWTSTAMP_CLOCK_TYPE_BOUNDARY_CLOCK;
 	else
 		p->curr_clktype = HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK;
