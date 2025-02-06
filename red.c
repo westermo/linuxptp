@@ -131,13 +131,6 @@ static bool red_port_up(struct red_port *rp)
 	return false;
 }
 
-/* static bool red_port_transmitting(struct red_port *rp) */
-/* { */
-/* 	if (red_port_up(rp) && rp->state == PS_MASTER) */
-/* 		return true; */
-/* 	return false; */
-/* } */
-
 static void red_port_set_state(struct red_port *rp, enum port_state state)
 {
 	if (rp->link_status & LINK_UP) {
@@ -197,19 +190,12 @@ static enum fsm_event red_port_link_status_event(struct red_port *rp)
 	struct red_port *other = red_other_port(rp);
 	int rp_up = rp->link_status == (LINK_UP | LINK_STATE_CHANGED);
 	int rp_down = (rp->link_status == (LINK_DOWN | LINK_STATE_CHANGED)) || (rp->link_status & TS_LABEL_CHANGED);
-	/* int other_up = other->link_status == (LINK_UP | LINK_STATE_CHANGED); */
-	/* int other_down = (other->link_status == (LINK_DOWN | LINK_STATE_CHANGED)) || (other->link_status & TS_LABEL_CHANGED); */
 	
 	
 	if (rp_up) {
 		if (rp->state != PS_FAULTY)
 			return EV_NONE;
 		red_port_fault_timeout(rp, 0);
-		/* if (other->state == PS_UNCALIBRATED || other->state == PS_SLAVE) */
-		/* 	red_port_p2p_transition(rp, PS_PASSIVE_SLAVE); */
-		/* else */
-		/* 	red_port_p2p_transition(rp, rp->upper->state); */
-		/* red_port_p2p_transition(rp, PS_LISTENING); */
 		rp->state = PS_INITIALIZING;
 		if (rp->upper->state == PS_FAULTY)
 			/* Triggers a red_dispatch() to clear FAULTY
@@ -239,8 +225,6 @@ static void red_port_set_hw_path_delay(struct red_port *rp)
 
 	if (clock_is_prp(rp->clock) && red_is_boundary(rp->upper))
 		return;
-	/* if (!clock_is_tc_hw_fwd(p->clock)) // && (!clock_is_hsr(p->clock) || !port_get_paired(p))) */
-		/* return; */
 
 	/* Include ingr/egr latency for HW forwarded packets.
 	 * Ideally they would be separate registers in HW, but right
@@ -250,7 +234,6 @@ static void red_port_set_hw_path_delay(struct red_port *rp)
 		+ (rp->tx_timestamp_offset >> 16);
 
 	/* Just use the event file descriptor */
-	/* pr_err("casan %s: writing pdelay %"PRId64, __func__, value);  */
 	port_write_hw_path_delay(rp->name, rp->upper->fda.fd[red_event_fd(rp)], value);
 }
 
@@ -276,32 +259,14 @@ static int red_port_set_fault_timer_lin(struct red_port *rp, int seconds)
 
 static int red_port_fault_timeout(struct red_port *rp, int set)
 {
-	/* struct fault_interval i; */
-
 	if (!set) {
 		pr_debug("clearing fault on %s", rp->log_name);
 		return red_port_set_fault_timer_lin(rp, 0);
 	}
 
 	pr_debug("waiting %d seconds to clear fault on %s", 10, rp->log_name);
-		 /* i.val, rp->log_name); */
-	// TODO: Fault length is hardcoded to 10
+	// XXX: Fault length is hardcoded to 10
 	return red_port_set_fault_timer_lin(rp, 10);
-
-	/* fault_interval(port, last_fault_type(port), &i); */
-
-	/* if (i.type == FTMO_LINEAR_SECONDS) { */
-	/* 	pr_debug("waiting %d seconds to clear fault on %s", */
-	/* 		 i.val, port_log_name(port)); */
-	/* 	return port_set_fault_timer_lin(port, i.val); */
-	/* } else if (i.type == FTMO_LOG2_SECONDS) { */
-	/* 	pr_debug("waiting 2^{%d} seconds to clear fault on %s", */
-	/* 		 i.val, port_log_name(port)); */
-	/* 	return port_set_fault_timer_log(port, 1, i.val); */
-	/* } */
-
-	/* pr_err("Unsupported fault interval type %d", i.type); */
-	/* return -1; */
 }
 
 static enum fsm_event red_is_faulty(struct port *p)
@@ -351,7 +316,6 @@ static void red_port_init_rtnl(struct red_port *rp)
 
 static int red_port_initialize(struct red_port *rp)
 {
-	pr_err("casan %s: initializing %s", __func__, rp->log_name);
 	if (red_is_a(rp)) {
 		if (transport_open(rp->trp, rp->iface, &rp->upper->fda, rp->upper->timestamping))
 			goto no_tropen;
@@ -371,26 +335,11 @@ static int red_port_initialize(struct red_port *rp)
 		red_port_set_socket_clk_type(rp, HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK);
 	}
 
-
-	/* for (i = 0; i < N_TIMER_FDS; i++) { */
-		/* p->fda.fd[FD_FIRST_TIMER + i] = fd[i]; */
-	/* } */
-
 	if (red_port_set_announce_tmo(rp)) {
 		goto no_tmo;
 	}
-	/* if (red_port_set_announce_tmo(p->red_b)) { */
-		/* goto no_tmo; */
-	/* } */
-	/* if (unicast_client_enabled(p) && unicast_client_set_tmo(p)) { */
-		/* goto no_tmo; */
-	/* } */
-	
 	red_port_init_rtnl(rp);
-	/* red_port_init_rtnl(p->red_b); */
-
 	red_port_nrate_initialize(rp);
-	/* red_port_nrate_initialize(p->red_b); */
 
 	clock_fda_changed(rp->upper->clock);
 	return 0;
@@ -404,10 +353,6 @@ no_tmo:
 	}
 no_tropen:
 	return -1;
-/* 	for (i = 0; i < N_TIMER_FDS; i++) { */
-/* 		if (fd[i] >= 0) */
-/* 			close(fd[i]); */
-/* 	} */
 }
 
 int red_initialize(struct port *p)
@@ -467,53 +412,10 @@ int red_initialize(struct port *p)
 		}
 	}
 
-	/* transport_open sets FD_EVENT and FD_GENERAL. Open B first and move them to _B */
-	/* if (transport_open(p->red_b->trp, p->red_b->iface, &p->fda, p->timestamping)) */
-	/* 	goto no_tropen; */
-	/* p->fda.fd[FD_EVENT_B] = p->fda.fd[FD_EVENT]; */
-	/* p->fda.fd[FD_GENERAL_B] = p->fda.fd[FD_GENERAL]; */
-	/* if (transport_open(p->red_a->trp, p->red_a->iface, &p->fda, p->timestamping)) */
-	/* 	goto no_tropen; */
-
 	for (i = 0; i < N_TIMER_FDS; i++) {
 		p->fda.fd[FD_FIRST_TIMER + i] = fd[i];
 	}
 
-	/* if (red_port_set_announce_tmo(p->red_a)) { */
-	/* 	goto no_tmo; */
-	/* } */
-	/* if (red_port_set_announce_tmo(p->red_b)) { */
-	/* 	goto no_tmo; */
-	/* } */
-	/* if (unicast_client_enabled(p) && unicast_client_set_tmo(p)) { */
-		/* goto no_tmo; */
-	/* } */
-
-	/* No need to open rtnl socket on UDS port. */
-	/* if (!port_is_uds(p)) { */
-	/* 	/\* */
-	/* 	 * The delay timer is usually started when the device */
-	/* 	 * transitions to PS_LISTENING. But, we are skipping the state */
-	/* 	 * when BMCA == 'noop'. So, start the timer here. */
-	/* 	 *\/ */
-	/* 	if (p->bmca == BMCA_NOOP) { */
-	/* 		port_set_delay_tmo(p); */
-	/* 	} */
-	/* 	if (p->fda.fd[FD_RTNL] == -1) { */
-	/* 		p->fda.fd[FD_RTNL] = rtnl_open(); */
-	/* 	} */
-	/* 	if (p->fda.fd[FD_RTNL] >= 0) { */
-	/* 		const char *ifname = interface_name(p->iface); */
-	/* 		rtnl_link_query(p->fda.fd[FD_RTNL], ifname); */
-	/* 	} */
-	/* } */
-	
-	/* red_port_init_rtnl(p->red_a); */
-	/* red_port_init_rtnl(p->red_b); */
-
-	/* red_port_nrate_initialize(p->red_a); */
-	/* red_port_nrate_initialize(p->red_b); */
-	
 	if (red_port_initialize(p->red_a))
 		goto no_tmo;
 	if (red_port_initialize(p->red_b))
@@ -526,7 +428,6 @@ int red_initialize(struct port *p)
 	return 0;
 
 no_tmo:
-/* no_tropen: */
 no_timers:
 	for (i = 0; i < N_TIMER_FDS; i++) {
 		if (fd[i] >= 0)
@@ -579,22 +480,17 @@ static void red_port_free_foreign_masters(struct red_port *rp)
 
 static void red_port_disable(struct red_port *rp)
 {
-	/* int anno_fd = red_anno_fd(rp); */
 
-	if (rp->state == PS_DISABLED || rp->state == PS_FAULTY) {
-		pr_err("casan %s: already disabled [%s]", __func__, rp->log_name);
+	if (rp->state == PS_DISABLED || rp->state == PS_FAULTY)
 		return;
-	}
 
-	pr_err("casan %s: disabling [%s]", __func__, rp->log_name);
-	/* tc_flush(p); */
 	/* flush_last_sync(p); */
 	/* flush_delay_req(p); */
 	red_port_flush_peer_delay(rp);
 
 	port_clr_tmo(rp->upper->fda.fd[red_anno_fd(rp)]);
 
-	// TODO: Do we need to signal something? This does not feel like a perfect solution
+	// XXX: Do we need to signal something? This does not feel like a perfect solution
 	rp->upper->best = red_other_port(rp)->best;
 	rp->best = NULL;
 	red_port_free_foreign_masters(rp);
@@ -611,14 +507,6 @@ static void red_port_disable(struct red_port *rp)
 		rp->upper->fda.fd[FD_GENERAL_B] = -1;
 	}
 	clock_fda_changed(rp->clock);
-	// TODO: Should we close? Then we need to handle in initialize as well
-	/* int anno_fd = red_anno_fd(rp); */
-	/* close(rp->upper->fda.fd[anno_fd]); */
-	/* close(rp->upper->fda.fd[anno_fd]); */
-	/* red_port_clear_fda(rp); */
-
-	/* Keep rtnl socket to get link status info. */
-	/* clock_fda_changed(rp->clock); */
 }
 
 void red_disable(struct port *p)
@@ -626,8 +514,6 @@ void red_disable(struct port *p)
 	int i;
 
 	p->best = NULL;
-	pr_err("casan %s: Disabling RED", __func__);
-	/* free_foreign_masters(p); */
 	
 	for (i = 0; i < N_TIMER_FDS; i++) {
 		if (i == FD_ANNOUNCE_TIMER || i == FD_ANNOUNCE_TIMER_B)
@@ -649,15 +535,6 @@ static int red_set_delay_tmo(struct port *p)
 {
 	return set_tmo_log(p->fda.fd[FD_DELAY_TIMER], 1,
 			   p->logPdelayReqInterval);
-	/* if (p->inhibit_delay_req) { */
-	/* 	return 0; */
-	/* } */
-
-	/* if (p->delayMechanism == DM_P2P) { */
-	/* } else { */
-	/* 	return set_tmo_random(p->fda.fd[FD_DELAY_TIMER], 0, 2, */
-	/* 			p->logMinDelayReqInterval); */
-	/* } */
 }
 
 static int red_set_qualification_tmo(struct port *p)
@@ -676,12 +553,6 @@ static int red_set_manno_tmo(struct port *p)
 	return set_tmo_log(p->fda.fd[FD_MANNO_TIMER], 1, p->logAnnounceInterval);
 }
 
-/* static void red_set_coupled_state(struct port *p, enum port_state state) */
-/* { */
-/* 	red_port_set_state(p->red_a, state); */
-/* 	red_port_set_state(p->red_b, state); */
-/* } */
-
 static void red_port_try_set_anno_tmo(struct red_port *rp)
 {
 	if (rp->state == PS_DISABLED || rp->state == PS_FAULTY)
@@ -698,8 +569,8 @@ static struct foreign_clock *red_port_compute_best(struct red_port *rp)
 	dscmp = clock_dscmp(rp->clock);
 	rp->best = NULL;
 
-	/* if (p->master_only) */
-		/* return p->best; */
+	if (rp->upper->master_only)
+		return rp->upper->best;
 
 	LIST_FOREACH(fc, &rp->foreign_masters, list) {
 		tmp = TAILQ_FIRST(&fc->messages);
@@ -803,36 +674,6 @@ static int red_state_update(struct port *p, enum fsm_event event, int mdiff)
 	return 0;
 }
 
-/* static void red_set_slave_ports(struct port *p, enum port_state next) */
-/* { */
-/* 	struct foreign_clock *fc = NULL; */
-	
-/* 	if (next == PS_SLAVE) { */
-/* 		if (p->red_a->state == PS_UNCALIBRATED) */
-/* 			red_port_set_state(p->red_a, PS_SLAVE); */
-/* 		else if (p->red_b->state == PS_UNCALIBRATED) */
-/* 			red_port_set_state(p->red_a, PS_SLAVE); */
-/* 		return; */
-/* 	} */
-
-/* 	fc = red_compute_best(p); */
-
-/* 	if (fc == p->red_a->best) { */
-/* 		p->phc_index = p->red_a->phc_index; */
-/* 		/\* red_port_show_transition(p->red_a, PS_UNCALIBRATED); *\/ */
-/* 		/\* red_port_show_transition(p->red_b, PS_PASSIVE_SLAVE); *\/ */
-/* 		red_port_set_state(p->red_a, PS_UNCALIBRATED); */
-/* 		red_port_set_state(p->red_b, PS_PASSIVE_SLAVE); */
-/* 	} else if (fc == p->red_b->best) { */
-/* 		p->phc_index = p->red_b->phc_index; */
-/* 		/\* red_port_show_transition(p->red_a, PS_PASSIVE_SLAVE); *\/ */
-/* 		/\* red_port_show_transition(p->red_b, PS_UNCALIBRATED); *\/ */
-/* 		red_port_set_state(p->red_a, PS_PASSIVE_SLAVE); */
-/* 		red_port_set_state(p->red_b, PS_UNCALIBRATED); */
-/* 	} */
-/* 	red_switch_phc(p); */
-/* } */
-
 static struct red_port *red_compute_slave_port(struct port *p)
 {
 	struct foreign_clock *fc = red_compute_best(p);
@@ -850,7 +691,6 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 	if (rp->state == next)
 		return;
 
-	pr_err("casan %s: %s", __func__, rp->log_name);
 	port_clr_tmo(rp->upper->fda.fd[red_anno_fd(rp)]);
 	rp->anno_timed_out = false;
 
@@ -896,7 +736,6 @@ static void red_p2p_transition(struct port *p, enum port_state next)
 	port_clr_tmo(p->fda.fd[FD_QUALIFICATION_TIMER]);
 	port_clr_tmo(p->fda.fd[FD_MANNO_TIMER]);
 	port_clr_tmo(p->fda.fd[FD_SYNC_TX_TIMER]);
-	/* Leave FD_UNICAST_REQ_TIMER running. */
 
 	switch (next) {
 	case PS_INITIALIZING:
@@ -1033,8 +872,7 @@ static enum fsm_event red_port_sync_anno_timer(struct red_port *rp, int fd_index
 		rp->upper->service_stats.announce_timeout++;
 	}
 
-	/*
-	 * Clear out the event returned by poll(). It is only cleared
+	/* Clear out the event returned by poll(). It is only cleared
 	 * in port_*_transition(). But, when BMCA == 'noop', there is no
 	 * state transition. So, it won't be cleared anywhere else.
 	 */
@@ -1045,26 +883,12 @@ static enum fsm_event red_port_sync_anno_timer(struct red_port *rp, int fd_index
 	if (rp->upper->inhibit_announce) {
 		port_clr_tmo(rp->upper->fda.fd[anno_fd]);
 	} else {
-		/* port_set_announce_tmo(p); */
 		red_port_set_announce_tmo(rp);
 	}
-
-	/* delay_req_prune(p); */
-	/* if (clock_slave_only(p->clock) && p->delayMechanism != DM_P2P && */
-	/*     port_renew_transport(p)) { */
-	/* 	return EV_FAULT_DETECTED; */
-	/* } */
 
 	if (rp->upper->inhibit_announce) {
 		return EV_NONE;
 	}
-
-	/* struct port *q = port_get_paired(p); */
-	/* if (q && q->state == PS_PASSIVE_SLAVE) { */
-	/* 	/\* Set other port to slave *\/ */
-	/* 	clock_hsr_prp_switchover(p->clock, p, q); */
-	/* 	return EV_NONE; */
-	/* } */
 
 	return EV_ANNOUNCE_RECEIPT_TIMEOUT_EXPIRES;
 }
@@ -1126,12 +950,8 @@ static int red_port_prepare_and_send(struct red_port *rp, struct ptp_message *ms
 	if (msg_pre_send(msg)) {
 		return -1;
 	}
-	/* if (msg_unicast(msg)) { */
-		/* cnt = transport_sendto(rp->trp, &rp->upper->fda, event, msg); */
-	/* } else { */
-	/* cnt = transport_send(rp->trp, &rp->upper->fda, event, msg); */
+
 	cnt = red_port_send(rp, event, msg);
-	/* } */
 	if (cnt <= 0) {
 		rp->upper->errorCounter++;
 		return -1;
@@ -1169,12 +989,8 @@ static int red_peer_prepare_and_send(struct red_port *rp, struct ptp_message *ms
 	if (msg_pre_send(msg)) {
 		return -1;
 	}
-	/* if (msg_unicast(msg)) { */
-	/* 	cnt = transport_sendto(rp->trp, &rp->upper->fda, event, msg); */
-	/* } else { */
-	/* cnt = transport_peer(rp->trp, &rp->upper->fda, event, msg); */
+
 	cnt = red_port_peer(rp, event, msg);
-	/* } */
 	if (cnt <= 0) {
 		return -1;
 	}
@@ -1211,12 +1027,7 @@ static int red_tx_sync(struct port *p, struct address *dst, uint16_t sequence_id
 	if (p->inhibit_multicast_service && !dst) {
 		return 0;
 	}
-	/* if (!port_capable(p)) { */
-	/* 	return 0; */
-	/* } */
-	/* if (port_sync_incapable(p)) { */
-	/* 	return 0; */
-	/* } */
+
 	msg = msg_allocate();
 	if (!msg) {
 		return -1;
@@ -1243,7 +1054,7 @@ static int red_tx_sync(struct port *p, struct address *dst, uint16_t sequence_id
 		/* It seems to assume corrections should be done in hardware
 		 * for onestep sync. Let's try in software.
 		 */
-		/* TODO:/Note: Since packets are duplicated in HW, it
+		/* XXX: Note: Since packets are duplicated in HW, it
 		* doesn't make sense if the ports have different offsets.
 		* But we need to use from one of the ports.
 		*/
@@ -1348,9 +1159,6 @@ static int red_tx_announce(struct port *p, struct address *dst, uint16_t sequenc
 	msg->announce.stepsRemoved            = clock_steps_removed(p->clock);
 	msg->announce.timeSource              = tp.timeSource;
 
-	/* if (p->path_trace_enabled && path_trace_append(p, msg, dad)) { */
-	/* 	pr_err("%s: append path trace failed", p->log_name); */
-	/* } */
 	/* if (ieee_c37_238_append(p, msg)) { */
 	/* 	pr_err("%s: append power profile failed", p->log_name); */
 	/* } */
@@ -1385,12 +1193,6 @@ static int red_port_pdelay_request(struct red_port *rp)
 	if (!red_port_up(rp))
 		return 0;
 
-	/* If multiple pdelay resp were not detected the counter can be reset */
-	/* if (!rp->multiple_pdr_detected) { */
-	/* 	rp->multiple_seq_pdr_count = 0; */
-	/* } */
-	/* rp->multiple_pdr_detected = 0; */
-
 	msg = msg_allocate();
 	if (!msg) {
 		return -1;
@@ -1407,11 +1209,6 @@ static int red_port_pdelay_request(struct red_port *rp)
 	msg->header.sequenceId         = rp->seqnum.delayreq++;
 	msg->header.logMessageInterval = rp->upper->logPdelayReqInterval;
 
-	/* if (unicast_client_enabled(p) && p->unicast_master_table->peer_name) { */
-	/* 	msg->address = p->unicast_master_table->peer_addr.address; */
-	/* 	msg->header.flagField[0] |= UNICAST; */
-	/* } */
-
 	err = red_peer_prepare_and_send(rp, msg, TRANS_EVENT);
 	if (err) {
 		pr_err("%s: send peer delay request failed", rp->log_name);
@@ -1423,9 +1220,6 @@ static int red_port_pdelay_request(struct red_port *rp)
 	}
 
 	if (rp->peer_delay_req) {
-		/* if (port_capable(p)) { */
-			/* p->pdr_missing++; */
-		/* } */
 		msg_put(rp->peer_delay_req);
 	}
 	rp->peer_delay_req = msg;
@@ -1500,14 +1294,10 @@ static void red_port_synchronize(struct red_port *rp,
 		    sync_interval != rp->upper->initialLogSyncInterval) {
 			rp->upper->logPdelayReqInterval = rp->upper->logMinPdelayReqInterval;
 			rp->upper->logSyncInterval = rp->upper->initialLogSyncInterval;
-			/* port_tx_interval_request(rp->upper, SIGNAL_NO_CHANGE, */
-			/* 			 SIGNAL_SET_INITIAL, */
-			/* 			 SIGNAL_NO_CHANGE); */
 		}
 		break;
 	case SERVO_JUMP:
 		port_dispatch(rp->upper, EV_SYNCHRONIZATION_FAULT, 0);
-		/* flush_delay_req(p); */
 		if (rp->peer_delay_req) {
 			msg_put(rp->peer_delay_req);
 			rp->peer_delay_req = NULL;
@@ -1525,8 +1315,6 @@ static void red_port_synchronize(struct red_port *rp,
 
 static void red_port_process_sync(struct red_port *rp, struct ptp_message *m)
 {
-	/* enum syfu_event event; */
-
 	switch (rp->state) {
 	case PS_INITIALIZING:
 	case PS_FAULTY:
@@ -1566,19 +1354,15 @@ static void red_port_process_sync(struct red_port *rp, struct ptp_message *m)
 
 	m->header.correction += rp->asymmetry;
 
-	// TODO: RESTORE THIS
-	/* struct timestamp origin_ts; */
-	/* origin_ts.nsec = 500000; */
-	/* origin_ts.sec = 15; */
 	if (one_step(m)) {
 		red_port_synchronize(rp, m->header.sequenceId,
 				     m->hwts.ts, m->ts.pdu,
-				     /* m->hwts.ts, origin_ts, */
 				     m->header.correction, 0,
 				     m->header.logMessageInterval);
 		/* flush_last_sync(p); */
 		return;
 	}
+	/* TODO: Support 2-step reception */
 	pr_err("RED: Received 2-step Sync. Not supported");
 
 	/* if (p->syfu == SF_HAVE_FUP && */
@@ -1622,11 +1406,7 @@ static int red_port_process_pdelay_req(struct red_port *rp, struct ptp_message *
 		pr_warning("%s: pdelay_req on E2E port", rp->log_name);
 		return 0;
 	}
-	/* if (rp->upper->delayMechanism == DM_AUTO) { */
-	/* 	pr_info("%s: peer detected, switch to P2P", rp->log_name); */
-	/* 	p->delayMechanism = DM_P2P; */
-	/* 	port_set_delay_tmo(p); */
-	/* } */
+
 	if (rp->peer_portid_valid) {
 		if (!pid_eq(&rp->peer_portid, &m->header.sourcePortIdentity)) {
 			pr_err("%s: received pdelay_req msg with "
@@ -1684,11 +1464,6 @@ static int red_port_process_pdelay_req(struct red_port *rp, struct ptp_message *
 			tmv_to_Timestamp(m->hwts.ts);
 	}
 	rsp->pdelay_resp.requestingPortIdentity = m->header.sourcePortIdentity;
-
-	/* if (msg_unicast(m)) { */
-	/* 	rsp->address = m->address; */
-	/* 	rsp->header.flagField[0] |= UNICAST; */
-	/* } */
 
 	err = red_peer_prepare_and_send(rp, rsp, event);
 	if (err) {
@@ -1846,7 +1621,6 @@ static int red_port_process_pdelay_resp(struct red_port *rp, struct ptp_message 
 				rp->log_name,
 				pid2str(&m->header.sourcePortIdentity));
 			rp->peer_portid_valid = 0;
-			/* port_capable(p); */
 		}
 	} else {
 		rp->peer_portid_valid = 1;
@@ -1891,11 +1665,6 @@ static int red_port_add_foreign_master(struct red_port *rp, struct ptp_message *
 		}
 	}
 	if (!fc) {
-		/* if (unicast_client_enabled(p)) { */
-		/* 	if (!port_unicast_message_valid(p, m)) { */
-		/* 		return 0; */
-		/* 	} */
-		/* } */
 		pr_notice("%s: new foreign master %s", rp->log_name,
 			pid2str(&m->header.sourcePortIdentity));
 
@@ -1907,7 +1676,7 @@ static int red_port_add_foreign_master(struct red_port *rp, struct ptp_message *
 		memset(fc, 0, sizeof(*fc));
 		TAILQ_INIT(&fc->messages);
 		LIST_INSERT_HEAD(&rp->foreign_masters, fc, list);
-		fc->port = rp->upper; // TODO? Probably should be like this
+		fc->port = rp->upper;
 		fc->dataset.sender = m->header.sourcePortIdentity;
 		/* We do not count this first message, see 9.5.3(b) */
 		return 0;
@@ -1943,8 +1712,6 @@ static int red_port_update_current_master(struct red_port *rp, struct ptp_messag
 {
 	struct foreign_clock *fc = rp->best;
 	struct ptp_message *tmp;
-	/* struct parent_ds *dad; */
-	/* struct path_trace_tlv *ptt; */
 	struct timePropertiesDS tds;
 
 	if (!msg_source_equal(m, fc))
@@ -1956,12 +1723,7 @@ static int red_port_update_current_master(struct red_port *rp, struct ptp_messag
 		tds.timeSource = m->announce.timeSource;
 		clock_update_time_properties(rp->clock, tds);
 	}
-	/* if (p->path_trace_enabled) { */
-	/* 	ptt = (struct path_trace_tlv *) m->announce.suffix; */
-	/* 	dad = clock_parent_ds(p->clock); */
-	/* 	memcpy(dad->ptl, ptt->cid, ptt->length); */
-	/* 	dad->path_length = path_length(ptt); */
-	/* } */
+
 	rp->anno_timed_out = false;
 	red_port_set_announce_tmo(rp);
 	fc_prune(fc);
@@ -2038,7 +1800,6 @@ static enum fsm_event red_port_timeout_slave(struct red_port *rp)
 {
 	struct red_port *other = red_other_port(rp);
 
-	pr_err("casan %s: %s", __func__, rp->log_name);
 	/* If it's the second timeout in a row. Wait until both ports
 	 * have timed out. Then we try to assume GM role. This is to
 	 * prevent trying to assume Master role if there are redundant
@@ -2047,7 +1808,6 @@ static enum fsm_event red_port_timeout_slave(struct red_port *rp)
 	if (rp->anno_timed_out) {
 		if (other->anno_timed_out || !red_port_up(other))
 			return EV_ANNOUNCE_RECEIPT_TIMEOUT_EXPIRES;
-		/* return EV_NONE; */
 		return red_switchover(rp, PS_PASSIVE_SLAVE);
 	}
 
@@ -2058,11 +1818,7 @@ static enum fsm_event red_port_timeout_slave(struct red_port *rp)
 	* and send out new Announce messages.
 	*/
 	red_port_set_announce_tmo_onesec(rp);
-	/* Wait for the second timeout */
-	/* if (other->anno_timed_out) */
 	return EV_NONE;
-
-	/* return red_switchover(rp, PS_PASSIVE_SLAVE); */
 }
 
 static enum fsm_event red_port_anno_tmo(struct red_port *rp, int fd_index)
@@ -2091,8 +1847,10 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 	case FD_ANNOUNCE_TIMER:
 	case FD_SYNC_RX_TIMER:
 		return red_port_anno_tmo(p->red_a, fd_index);
+
 	case FD_ANNOUNCE_TIMER_B:
 		return red_port_anno_tmo(p->red_b, fd_index);
+
 	case FD_DELAY_TIMER:
 		pr_debug("%s: delay timeout", p->log_name);
 		red_set_delay_tmo(p);
@@ -2115,16 +1873,6 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 			else if (faults)
 				red_dispatch_ports(p);
 		}
-
-		/* if (p->delay_response_timeout && p->state == PS_SLAVE) { */
-		/* 	p->delay_response_counter++; */
-		/* 	if (p->delay_response_counter >= p->delay_response_timeout) { */
-		/* 		p->delay_response_counter = 0; */
-		/* 		tsproc_reset(clock_get_tsproc(p->clock), 1); */
-		/* 		pr_err("%s: delay response timeout", p->log_name); */
-		/* 		return EV_SYNCHRONIZATION_FAULT; */
-		/* 	} */
-		/* } */
 		return EV_NONE;
 
 	case FD_QUALIFICATION_TIMER:
@@ -2147,40 +1895,17 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 		return red_tx_sync(p, NULL, p->seqnum.sync++) ?
 			EV_FAULT_DETECTED : EV_NONE;
 
-	/* case FD_UNICAST_SRV_TIMER: */
-	/* 	pr_debug("%s: unicast service timeout", p->log_name); */
-	/* 	p->service_stats.unicast_service_timeout++; */
-	/* 	return unicast_service_timer(p) ? EV_FAULT_DETECTED : EV_NONE; */
-
-	/* case FD_UNICAST_REQ_TIMER: */
-	/* 	pr_debug("%s: unicast request timeout", p->log_name); */
-	/* 	p->service_stats.unicast_request_timeout++; */
-	/* 	return unicast_client_timer(p) ? EV_FAULT_DETECTED : EV_NONE; */
-
 	case FD_RTNL:
 		pr_debug("%s: received link status notification", p->red_a->log_name);
 		rtnl_link_status(fd, p->red_a->name, red_link_status, p->red_a);
 		return red_port_link_status_event(p->red_a);
-		/* if (p->red_a->link_status == (LINK_UP | LINK_STATE_CHANGED)) */
-		/* 	return EV_FAULT_CLEARED; */
-		/* else if ((p->red_a->link_status == (LINK_DOWN | LINK_STATE_CHANGED)) || */
-		/* 	 (p->red_a->link_status & TS_LABEL_CHANGED)) */
-		/* 	return EV_FAULT_DETECTED; */
-		/* else */
-		/* 	return EV_NONE; */
+
 	case FD_RTNL_B:
 		pr_debug("%s: received link status notification", p->red_b->log_name);
 		rtnl_link_status(fd, p->red_b->name, red_link_status, p->red_b);
 		return red_port_link_status_event(p->red_b);
-	/* 	if (p->link_status == (LINK_UP | LINK_STATE_CHANGED)) */
-	/* 		return EV_FAULT_CLEARED; */
-	/* 	else if ((p->link_status == (LINK_DOWN | LINK_STATE_CHANGED)) || */
-	/* 		 (p->link_status & TS_LABEL_CHANGED)) */
-	/* 		return EV_FAULT_DETECTED; */
-	/* 	else */
-	/* 		return EV_NONE; */
+
 	case FD_FAULT_RED_A:
-		pr_err("TODO: implement FD_FAULT_RED_A");
 		red_port_fault_timeout(p->red_a, 0);
 		if (!red_port_link_status_get(p->red_a))
 			return EV_NONE;
@@ -2189,9 +1914,9 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 			return EV_FAULT_CLEARED;
 		else
 			red_dispatch_ports(p);
-		break;
+		return EV_NONE;
+
 	case FD_FAULT_RED_B:
-		pr_err("TODO: implement FD_FAULT_RED_B");
 		red_port_fault_timeout(p->red_b, 0);
 		if (!red_port_link_status_get(p->red_b))
 			return EV_NONE;
@@ -2200,7 +1925,7 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 			return EV_FAULT_CLEARED;
 		else
 			red_dispatch_ports(p);
-		break;
+		return EV_NONE;
 	}
 
 	struct red_port *rp = NULL;
@@ -2259,10 +1984,6 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 	case SYNC:
 		red_port_process_sync(rp, msg);
 		break;
-	/* case DELAY_REQ: */
-	/* 	if (process_delay_req(p, msg)) */
-	/* 		event = EV_FAULT_DETECTED; */
-	/* 	break; */
 	case PDELAY_REQ:
 		if (red_port_process_pdelay_req(rp, msg)) {
 			red_port_fault(rp);
@@ -2280,9 +2001,6 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 	/* case FOLLOW_UP: */
 	/* 	red_process_follow_up(p, msg); */
 	/* 	break; */
-	/* case DELAY_RESP: */
-		/* red_process_delay_resp(p, msg); */
-		/* break; */
 	case PDELAY_RESP_FOLLOW_UP:
 		red_port_process_pdelay_resp_fup(rp, msg);
 		break;
@@ -2290,13 +2008,8 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 		if (red_port_process_announce(rp, msg))
 			event = EV_STATE_DECISION_EVENT;
 		break;
-	/* case SIGNALING: */
-	/* 	if (red_process_signaling(rp, msg)) { */
-	/* 		event = EV_FAULT_DETECTED; */
-	/* 	} */
-	/* 	break; */
 	case MANAGEMENT:
-		// TODO
+		// TODO: Management does send/forward replies on RED ports
 		if (clock_manage(p->clock, p, msg))
 			event = EV_STATE_DECISION_EVENT;
 		break;
@@ -2345,8 +2058,6 @@ struct port *red_open(const char *phc_device,
 	struct config *cfg = clock_config(clock);
 	struct port *p = malloc(sizeof(*p));
 	struct interface *interface;
-	/* struct interface *iface_a = NULL; */
-	/* struct interface *iface_b = NULL; */
 	struct red_port *red_a = NULL;
 	struct red_port *red_b = NULL;
 	int err, i;
@@ -2421,8 +2132,6 @@ struct port *red_open(const char *phc_device,
 	p->jbod = config_get_int(cfg, interface_name(iface_a), "boundary_clock_jbod");
 	p->master_only = config_get_int(cfg, interface_name(iface_a), "serverOnly");
 	p->bmca = config_get_int(cfg, interface_name(iface_a), "BMCA");
-	/* p->trp = transport_create(cfg, config_get_int(cfg, */
-			      /* interface_name(interface), "network_transport")); */
 	red_a->trp = NULL;
 	red_b->trp = NULL;
 	red_a->trp = transport_create(cfg, config_get_int(cfg,
@@ -2452,19 +2161,10 @@ struct port *red_open(const char *phc_device,
 	err |= red_set_phc(cfg, phc_device, phc_index, p, red_b);
 	if (err)
 		goto err_transport;
-	// TODO: ???
-	p->phc_index = -1; //red_a->phc_index;
+	p->phc_index = -1;
 
-	/* p->iface = interface; */
-	/* p->asymmetry = config_get_int(cfg, p->name, "delayAsymmetry"); */
-	/* p->asymmetry <<= 16; */
 	p->announce_span = 1;
-	/* p->follow_up_info = config_get_int(cfg, p->name, "follow_up_info"); */
 	p->freq_est_interval = config_get_int(cfg, p->name, "freq_est_interval");
-	/* p->msg_interval_request = config_get_int(cfg, p->name, "msg_interval_request"); */
-	/* p->net_sync_monitor = config_get_int(cfg, p->name, "net_sync_monitor"); */
-	/* p->path_trace_enabled = config_get_int(cfg, p->name, "path_trace_enabled"); */
-	/* p->tc_spanning_tree = config_get_int(cfg, p->name, "tc_spanning_tree"); */
 	red_a->asymmetry = config_get_int(cfg, red_a->name, "delayAsymmetry");
 	red_b->asymmetry = config_get_int(cfg, red_b->name, "delayAsymmetry");
 	red_a->rx_timestamp_offset = config_get_int(cfg, red_a->name, "ingressLatency");
@@ -2510,11 +2210,6 @@ struct port *red_open(const char *phc_device,
 	/* 	config_get_int(cfg, p->name, "power_profile.2017.totalTimeInaccuracy"); */
 	p->slave_event_monitor = clock_slave_monitor(clock);
 	p->allowedLostResponses = config_get_int(cfg, p->name, "allowedLostResponses");
-
-	/* if (type == CLOCK_TYPE_P2P && p->delayMechanism != DM_P2P) { */
-	/* 	pr_err("%s: P2P TC needs P2P ports", p->log_name); */
-	/* 	goto err_transport; */
-	/* } */
 
 	/* Set fault timeouts to a default value */
 	for (i = 0; i < FT_CNT; i++) {
@@ -2617,11 +2312,7 @@ err_port:
 
 void red_close(struct port *p)
 {
-	pr_err("casan %s", __func__);
-	// TODO
-
 	if (port_is_enabled(p)) {
-		/* port_cancel_unicast(p); */
 		red_disable(p);
 	}
 
@@ -2632,8 +2323,6 @@ void red_close(struct port *p)
 		rtnl_close(p->fda.fd[FD_RTNL]);
 	}
 
-	/* unicast_client_cleanup(p); */
-	/* unicast_service_cleanup(p); */
 	interface_destroy(p->iface);
 	red_port_flush_peer_delay(p->red_a);
 	red_port_flush_peer_delay(p->red_b);
@@ -2645,12 +2334,6 @@ void red_close(struct port *p)
 	free(p->red_b->log_name);
 	free(p->red_a);
 	free(p->red_b);
-	/* if (p->red_a->fault_fd >= 0) { */
-	/* 	close(p->red_a->fault_fd); */
-	/* } */
-	/* if (p->red_b->fault_fd >= 0) { */
-	/* 	close(p->red_b->fault_fd); */
-	/* } */
 	if (p->fault_fd >= 0) {
 		close(p->fault_fd);
 	}
@@ -2683,7 +2366,6 @@ static enum fsm_event red_switchover(struct red_port *from, enum port_state from
 	struct red_port *other = red_other_port(from);
 	enum port_state prev = from->state;
 
-	pr_err("casan %s", __func__);
 	if (red_port_is_slave(from) && red_port_is_slave_backup(other)) {
 		red_port_p2p_transition(from, from_next);
 		red_port_p2p_transition(other, prev);
@@ -2708,7 +2390,6 @@ static void red_dispatch_ports(struct port *p)
 		red_port_initialize(rpb);
 	}
 	
-	pr_err("casan %s: State %s", __func__, ps_str[p->state]);
 	/* red_port's have their settings updated later in red_port_p2p_transition() */
 	switch (p->state) {
 	case PS_INITIALIZING:
@@ -2734,9 +2415,7 @@ static void red_dispatch_ports(struct port *p)
 		break;
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
-		/* pr_info("Selected %s for slave", slave->log_name); */
 		if (red_port_up(rpa) && red_port_up(rpb)) {
-			pr_err("casan: both ports up");
 			next_a = slave == rpa ? p->state : PS_PASSIVE_SLAVE;
 			next_b = slave == rpb ? p->state : PS_PASSIVE_SLAVE;
 			phc_index = slave == rpa ? rpa->phc_index : rpb->phc_index;
@@ -2751,11 +2430,9 @@ static void red_dispatch_ports(struct port *p)
 				phc_index = rpa->phc_index;
 			}
 		} else if (red_port_up(rpa)) {
-			pr_err("casan: only A port up");
 			next_a = p->state;
 			phc_index = rpa->phc_index;
 		} else if (red_port_up(rpb)) {
-			pr_err("casan: only B port up");
 			next_b = p->state;
 			phc_index = rpb->phc_index;
 		} else {
@@ -2781,78 +2458,6 @@ static void red_dispatch_ports(struct port *p)
 		red_switch_phc(p, phc_index);
 }
 
-/* static int red_port_management_get_response(struct red_port *rp, */
-/* 					    struct port *ingress, int id, */
-/* 					    struct ptp_message *req) */
-/* { */
-/* 	struct PortIdentity pid = port_identity(target); */
-/* 	struct ptp_message *rsp; */
-/* 	int respond; */
-
-/* 	rsp = port_management_reply(pid, ingress, req); */
-/* 	if (!rsp) { */
-/* 		return 0; */
-/* 	} */
-/* 	respond = port_management_fill_response(target, rsp, id); */
-/* 	if (respond) */
-/* 		port_prepare_and_send(ingress, rsp, TRANS_GENERAL); */
-/* 	msg_put(rsp); */
-/* 	return respond; */
-/* } */
-
-/* int red_manage(struct port *p, struct port *ingress, struct ptp_message *msg) */
-/* { */
-/* 	struct management_tlv *mgt; */
-/* 	UInteger16 target = msg->management.targetPortIdentity.portNumber; */
-
-/* 	if (target != portnum(p) && target != 0xffff) { */
-/* 		return 0; */
-/* 	} */
-/* 	mgt = (struct management_tlv *) msg->management.suffix; */
-
-/* 	switch (management_action(msg)) { */
-/* 	case GET: */
-/* 		if (port_management_get_response(p, ingress, mgt->id, msg)) */
-/* 			return 1; */
-/* 		break; */
-/* 	case SET: */
-/* 		if (port_management_set(p, ingress, mgt->id, msg)) */
-/* 			return 1; */
-/* 		break; */
-/* 	case COMMAND: */
-/* 		break; */
-/* 	default: */
-/* 		return -1; */
-/* 	} */
-
-/* 	switch (mgt->id) { */
-/* 	case MID_NULL_MANAGEMENT: */
-/* 	case MID_CLOCK_DESCRIPTION: */
-/* 	case MID_PORT_DATA_SET: */
-/* 	case MID_LOG_ANNOUNCE_INTERVAL: */
-/* 	case MID_ANNOUNCE_RECEIPT_TIMEOUT: */
-/* 	case MID_LOG_SYNC_INTERVAL: */
-/* 	case MID_VERSION_NUMBER: */
-/* 	case MID_ENABLE_PORT: */
-/* 	case MID_DISABLE_PORT: */
-/* 	case MID_UNICAST_NEGOTIATION_ENABLE: */
-/* 	case MID_UNICAST_MASTER_TABLE: */
-/* 	case MID_UNICAST_MASTER_MAX_TABLE_SIZE: */
-/* 	case MID_ACCEPTABLE_MASTER_TABLE_ENABLED: */
-/* 	case MID_ALTERNATE_MASTER: */
-/* 	case MID_MASTER_ONLY: */
-/* 	case MID_TRANSPARENT_CLOCK_PORT_DATA_SET: */
-/* 	case MID_DELAY_MECHANISM: */
-/* 	case MID_LOG_MIN_PDELAY_REQ_INTERVAL: */
-/* 		port_management_send_error(p, ingress, msg, MID_NOT_SUPPORTED); */
-/* 		break; */
-/* 	default: */
-/* 		port_management_send_error(p, ingress, msg, MID_NO_SUCH_ID); */
-/* 		return -1; */
-/* 	} */
-/* 	return 1; */
-/* } */
-
 static const Octet profile_id_drr[] = {0x00, 0x1B, 0x19, 0x00, 0x01, 0x00};
 static const Octet profile_id_p2p[] = {0x00, 0x1B, 0x19, 0x00, 0x02, 0x00};
 static const Octet profile_id_8275_1[] = {0x00, 0x19, 0xA7, 0x01, 0x02, 0x03};
@@ -2862,13 +2467,10 @@ static int red_port_management_fill_response(struct red_port *rp,
 					     struct ptp_message *rsp, int id)
 {
 	struct ieee_c37_238_settings_np *pwr;
-	/* struct unicast_master_table_np *umtn; */
 	struct transparentClockPortDS *tcpds;
-	/* struct unicast_master_address *ucma; */
 	struct port_service_stats_np *pssn;
 	struct mgmt_clock_description *cd;
 	struct management_tlv_datum *mtd;
-	/* struct unicast_master_entry *ume; */
 	struct clock_description *desc;
 	struct port_properties_np *ppn;
 	struct port_hwclock_np *phn;
@@ -3001,7 +2603,7 @@ static int red_port_management_fill_response(struct red_port *rp,
 			pds->iec62439_ds.vlanPrio = target->egress_vlan_prio;
 			pds->iec62439_ds.twoStepFlag = 0; /* We don't support twostep for HSR/PRP for now */
 
-			/* TODO: Not sure if other devices uses the
+			/* XXX: Not sure if other devices uses the
 			 * same definition for their clockId (based on
 			 * MAC), but ptp4l hides the transport layer from
 			 * the PTP layer so this is the best we can do
@@ -3059,7 +2661,7 @@ static int red_port_management_fill_response(struct red_port *rp,
 			tcpds->iec62439_ds.dlyAsymmetry = 0;
 			tcpds->iec62439_ds.twoStepFlag = 0; /* We don't support twostep for HSR/PRP for now */
 
-			/* TODO: Not sure if other devices uses the
+			/* XXX: Not sure if other devices uses the
 			 * same definition for their clockId (based on
 			 * MAC), but ptp4l hides the transport layer from
 			 * the PTP layer so this is the best we can do
@@ -3123,48 +2725,6 @@ static int red_port_management_fill_response(struct red_port *rp,
 		pssn->stats = target->service_stats;
 		datalen = sizeof(*pssn);
 		break;
-	/* case MID_UNICAST_MASTER_TABLE_NP: */
-	/* 	umtn = (struct unicast_master_table_np *)tlv->data; */
-	/* 	buf = tlv->data + sizeof(umtn->actual_table_size); */
-	/* 	if (!unicast_client_enabled(target)) { */
-	/* 		umtn->actual_table_size = 0; */
-	/* 		datalen = buf - tlv->data; */
-	/* 		break; */
-	/* 	} */
-
-	/* 	STAILQ_FOREACH(ucma, &target->unicast_master_table->addrs, */
-	/* 			list) { */
-	/* 		ume = (struct unicast_master_entry *) buf; */
-	/* 		ume->address.networkProtocol = ucma->type; */
-	/* 		address_to_portaddress( */
-	/* 			&ucma->address, &ume->address); */
-	/* 		ume->port_identity = ucma->portIdentity; */
-	/* 		ume->port_state = ucma->state; */
-	/* 		pid = clock_parent_identity(target->clock); */
-	/* 		if (pid_eq(&ucma->portIdentity, &pid)) { */
-	/* 			ume->selected = 1; */
-	/* 		} */
-
-	/* 		/\* iterate over foreign masters and search for */
-	/* 		 * the current identity */
-	/* 		 *\/ */
-	/* 		LIST_FOREACH(fc, &target->foreign_masters, */
-	/* 				list) { */
-	/* 			if (pid_eq(&ume->port_identity, */
-	/* 					&fc->dataset.sender)) { */
-	/* 				ume->clock_quality = */
-	/* 					fc->dataset.quality; */
-	/* 				ume->priority1 = fc->dataset.priority1; */
-	/* 				ume->priority2 = fc->dataset.priority2; */
-	/* 				break; */
-	/* 			} */
-	/* 		} */
-	/* 		buf += sizeof(struct unicast_master_entry) + */
-	/* 			ume->address.addressLength; */
-	/* 		umtn->actual_table_size++; */
-	/* 	} */
-	/* 	datalen = buf - tlv->data; */
-	/* 	break; */
 	case MID_PORT_HWCLOCK_NP:
 		phn = (struct port_hwclock_np *)tlv->data;
 		phn->portIdentity = rp->portIdentity;
