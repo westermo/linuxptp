@@ -262,6 +262,12 @@ static int red_port_set_announce_tmo(struct red_port *rp)
 			      rp->upper->announce_span, rp->upper->logAnnounceInterval);
 }
 
+static int red_port_set_announce_tmo_onesec(struct red_port *rp)
+{
+	int anno_fd = red_is_a(rp) ? FD_ANNOUNCE_TIMER : FD_ANNOUNCE_TIMER_B;
+	return set_tmo_lin(rp->upper->fda.fd[anno_fd], 1);
+}
+
 static int red_port_set_fault_timer_lin(struct red_port *rp, int seconds)
 {
 	int fault_fd = red_is_a(rp) ? FD_FAULT_RED_A : FD_FAULT_RED_B;
@@ -2018,8 +2024,10 @@ static enum fsm_event red_port_timeout_backup(struct red_port *rp)
 {
 	struct red_port *other = red_other_port(rp);
 	
-	/* Timeout must have happened on both to trigger takeover */
-	if (other->anno_timed_out)
+	/* Timeout must have happened on both to trigger takeover, or
+	 * if the other port is down.
+	 */
+	if (other->anno_timed_out || !red_port_up(other))
 		return EV_ANNOUNCE_RECEIPT_TIMEOUT_EXPIRES;
 
 	rp->anno_timed_out = true;
@@ -2037,17 +2045,24 @@ static enum fsm_event red_port_timeout_slave(struct red_port *rp)
 	 * BCs in the network.
 	 */
 	if (rp->anno_timed_out) {
-		if (other->anno_timed_out)
+		if (other->anno_timed_out || !red_port_up(other))
 			return EV_ANNOUNCE_RECEIPT_TIMEOUT_EXPIRES;
-		return EV_NONE;
+		/* return EV_NONE; */
+		return red_switchover(rp, PS_PASSIVE_SLAVE);
 	}
 
 	rp->anno_timed_out = true;
+	/* Set a one second timeout. This is so we don't wait another
+	* 3-4 seconds for next timeout in case a cable broken. But we
+	* still need some extra time for a Backup Master to take over
+	* and send out new Announce messages.
+	*/
+	red_port_set_announce_tmo_onesec(rp);
 	/* Wait for the second timeout */
-	if (other->anno_timed_out)
-		return EV_NONE;
+	/* if (other->anno_timed_out) */
+	return EV_NONE;
 
-	return red_switchover(rp, PS_PASSIVE_SLAVE);
+	/* return red_switchover(rp, PS_PASSIVE_SLAVE); */
 }
 
 static enum fsm_event red_port_anno_tmo(struct red_port *rp, int fd_index)
@@ -2745,13 +2760,18 @@ static void red_dispatch_ports(struct port *p)
 			phc_index = rpb->phc_index;
 		} else {
 			pr_err("RED interface should not be up when both ports are down");
+			red_dispatch(p, EV_FAULT_DETECTED, 0);
+			return;
 		}
 		break;
 	case PS_PASSIVE_SLAVE:
 		pr_err("RED interface should never be PASSIVE_SLAVE");
-		break;
+		red_dispatch(p, EV_FAULT_DETECTED, 0);
+		return;
 	};
 
+	rpa->anno_timed_out = false;
+	rpb->anno_timed_out = false;
         if (red_port_up(rpa))
 		red_port_p2p_transition(rpa, next_a);
         if (red_port_up(rpb))
