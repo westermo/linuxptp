@@ -189,6 +189,7 @@ struct port {
 	struct onestep_conversion_info onestep_info;
 	struct red_port *red_a;
 	struct red_port *red_b;
+	struct red_port *best_red; /* Points to red_a or red_b */
 	enum hwtstamp_clk_types curr_clktype;
 	int egress_vlan_tagged;
 	int egress_vlan_id;

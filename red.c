@@ -617,14 +617,21 @@ struct foreign_clock *red_compute_best(struct port *p)
 	best_b = red_port_compute_best(p->red_b);
 	
 	if (best_a && best_b) {
-		if (dscmp(&best_a->dataset, &best_b->dataset) >= 0)
+		if (dscmp(&best_a->dataset, &best_b->dataset) >= 0) {
 			p->best = best_a;
-		else
+			p->best_red = p->red_a;
+		} else {
 			p->best = best_b;
+			p->best_red = p->red_b;
+		}
 	} else if (best_a) {
 		p->best = best_a;
-	} else {
+		p->best_red = p->red_a;
+	} else if (best_b) {
 		p->best = best_b;
+		p->best_red = p->red_b;
+	} else {
+		p->best_red = NULL;
 	}
 
 	return p->best;
@@ -683,18 +690,6 @@ static int red_state_update(struct port *p, enum fsm_event event, int mdiff)
 	}
 
 	return 0;
-}
-
-static struct red_port *red_compute_slave_port(struct port *p)
-{
-	struct foreign_clock *fc = red_compute_best(p);
-
-	if (p->red_a->best && fc == p->red_a->best) {
-		return p->red_a;
-	} else if (p->red_b->best && fc == p->red_b->best) {
-		return p->red_b;
-	}
-	return NULL;
 }
 
 static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
@@ -2387,7 +2382,6 @@ static enum fsm_event red_switchover(struct red_port *from, enum port_state from
 
 static void red_dispatch_ports(struct port *p)
 {
-	struct red_port *slave = red_compute_slave_port(p);
 	struct red_port *rpa = p->red_a;
 	struct red_port *rpb = p->red_b;
 	enum port_state next_a = PS_FAULTY;
@@ -2426,10 +2420,15 @@ static void red_dispatch_ports(struct port *p)
 		break;
 	case PS_UNCALIBRATED:
 	case PS_SLAVE:
+		if (p->best_red == NULL) {
+			pr_err("RED: State Uncalibrated/Slave but no best port found");
+			red_dispatch(p, EV_FAULT_DETECTED, 0);
+			return;
+		}
 		if (red_port_up(rpa) && red_port_up(rpb)) {
-			next_a = slave == rpa ? p->state : PS_PASSIVE_SLAVE;
-			next_b = slave == rpb ? p->state : PS_PASSIVE_SLAVE;
-			phc_index = slave == rpa ? rpa->phc_index : rpb->phc_index;
+			next_a = p->best_red == rpa ? p->state : PS_PASSIVE_SLAVE;
+			next_b = p->best_red == rpb ? p->state : PS_PASSIVE_SLAVE;
+			phc_index = p->best_red == rpa ? rpa->phc_index : rpb->phc_index;
 			/* Don't swap if one port is already in UNCALIBRATED/SLAVE */
 			if (next_a == p->state && red_port_is_slave(rpb)) {
 				next_a = PS_PASSIVE_SLAVE;
