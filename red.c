@@ -741,6 +741,10 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 		if (next != PS_PASSIVE_SLAVE) {
 			snprintf(cmd, sizeof(cmd), "tcu -d %s", rp->name);
 			system(cmd);
+
+			/* restore ptp fwd rules in HW */
+			system("tcu -T dis");
+			system("tcu -T ena");
 		}
 	}
 }
