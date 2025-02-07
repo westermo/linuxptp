@@ -346,8 +346,10 @@ static int red_port_initialize(struct red_port *rp)
 	 * second.
 	 */
 	red_set_delay_tmo(rp->upper);
-	if (rp->upper->state == PS_MASTER || rp->upper->state == PS_GRAND_MASTER)
+	if (red_is_boundary(rp->upper)) {
+	    if (rp->upper->state == PS_MASTER || rp->upper->state == PS_GRAND_MASTER)
 		red_set_sync_tx_tmo(rp->upper);
+	}
 	return 0;
 no_tmo:
 	if (red_is_a(rp)) {
