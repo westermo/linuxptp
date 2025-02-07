@@ -694,6 +694,7 @@ static int red_state_update(struct port *p, enum fsm_event event, int mdiff)
 
 static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 {
+	char cmd[20];
 	if (rp->state == next)
 		return;
 
@@ -718,15 +719,30 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 		red_port_try_set_anno_tmo(rp);
 		break;
 	case PS_UNCALIBRATED:
+		red_port_flush_peer_delay(rp);
+		red_port_try_set_anno_tmo(rp);
+		break;
 	case PS_PASSIVE_SLAVE:
 		red_port_flush_peer_delay(rp);
-		/* fall through */
+		red_port_try_set_anno_tmo(rp);
+		if (red_is_transparent(rp->upper)) {
+			snprintf(cmd, sizeof(cmd), "tcu -g %s", rp->name);
+			system(cmd);
+		}
+		break;
 	case PS_SLAVE:
 		red_port_try_set_anno_tmo(rp);
 		break;
 	};
 	red_port_set_state(rp, next);
 	red_port_notify_event(rp, NOTIFY_PORT_STATE);
+
+	if (red_is_transparent(rp->upper)) {
+		if (next != PS_PASSIVE_SLAVE) {
+			snprintf(cmd, sizeof(cmd), "tcu -d %s", rp->name);
+			system(cmd);
+		}
+	}
 }
 
 static void red_port_fault(struct red_port *rp)
@@ -2276,10 +2292,14 @@ struct port *red_open(const char *phc_device,
 	}
 	p->errorCounter = 0;
 
-	if (red_is_boundary(p))
+	if (red_is_boundary(p)) {
 		p->curr_clktype = HWTSTAMP_CLOCK_TYPE_BOUNDARY_CLOCK;
-	else
+		system("tcu -g ethA");
+		system("tcu -g ethB");
+	} else {
 		p->curr_clktype = HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK;
+		system("tcu -T ena");
+	}
 
 	return p;
 
@@ -2318,6 +2338,10 @@ err_port:
 
 void red_close(struct port *p)
 {
+	system("tcu -d ethA");
+	system("tcu -d ethB");
+	system("tcu -T dis");
+
 	if (port_is_enabled(p)) {
 		red_disable(p);
 	}
