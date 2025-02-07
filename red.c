@@ -703,6 +703,10 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 		break;
 	case PS_FAULTY:
 	case PS_DISABLED:
+		if (red_is_transparent(rp->upper)) {
+			snprintf(cmd, sizeof(cmd), "tcu -g %s", rp->name);
+			system(cmd);
+		}
 		red_port_disable(rp);
 		break;
 	case PS_LISTENING:
@@ -735,7 +739,7 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 	red_port_notify_event(rp, NOTIFY_PORT_STATE);
 
 	if (red_is_transparent(rp->upper)) {
-		if (next != PS_PASSIVE_SLAVE) {
+		if (next != PS_PASSIVE_SLAVE && next != PS_FAULTY && next != PS_DISABLED) {
 			snprintf(cmd, sizeof(cmd), "tcu -d %s", rp->name);
 			system(cmd);
 
