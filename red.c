@@ -56,6 +56,8 @@ static void red_port_notify_event(struct red_port *rp, enum notification event);
 static void red_port_set_socket_clk_type(struct red_port *rp, int clk_type);
 static void red_hsr_swap_clock_mode(struct port *p);
 static int red_port_fault_timeout(struct red_port *rp, int set);
+static int red_set_delay_tmo(struct port *p);
+static int red_set_sync_tx_tmo(struct port *p);
 
 static bool red_is_boundary(struct port *p)
 {
@@ -342,6 +344,15 @@ static int red_port_initialize(struct red_port *rp)
 	red_port_nrate_initialize(rp);
 
 	clock_fda_changed(rp->upper->clock);
+
+	/* Reset timers. We've seen TX timestamps fail if done
+	 * immediately after link goes up (even though timestamping
+	 * should be configured). This delays the timers an extra
+	 * second.
+	 */
+	red_set_delay_tmo(rp->upper);
+	if (rp->upper->state == PS_MASTER || rp->upper->state == PS_GRAND_MASTER)
+		red_set_sync_tx_tmo(rp->upper);
 	return 0;
 no_tmo:
 	if (red_is_a(rp)) {
