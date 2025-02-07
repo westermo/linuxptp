@@ -135,13 +135,8 @@ static bool red_port_up(struct red_port *rp)
 
 static void red_port_set_state(struct red_port *rp, enum port_state state)
 {
-	if (rp->link_status & LINK_UP) {
-		red_port_show_transition(rp, state);
-		rp->state = state;
-	} else if (rp->state != PS_FAULTY) {
-		red_port_show_transition(rp, PS_FAULTY);
-		rp->state = PS_FAULTY;
-	}
+	red_port_show_transition(rp, state);
+	rp->state = state;
 }
 
 static void red_link_status(void *ctx, int linkup, int ts_index)
