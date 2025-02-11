@@ -465,16 +465,16 @@ static void red_port_clear_fda(struct red_port *rp)
 	rp->upper->fda.fd[red_anno_fd(rp)] = -1;
 }
 
-static void red_clear_fda(struct port *p, int count)
-{
-	int i;
+/* static void red_clear_fda(struct port *p, int count) */
+/* { */
+/* 	int i; */
 
-	for (i = 0; i < count; i++) {
-		if (i == FD_ANNOUNCE_TIMER || i == FD_ANNOUNCE_TIMER_B)
-			continue;
-		p->fda.fd[i] = -1;
-	}
-}
+/* 	for (i = 0; i < count; i++) { */
+/* 		if (i == FD_ANNOUNCE_TIMER || i == FD_ANNOUNCE_TIMER_B) */
+/* 			continue; */
+/* 		p->fda.fd[i] = -1; */
+/* 	} */
+/* } */
 
 static void red_port_free_foreign_masters(struct red_port *rp)
 {
@@ -524,8 +524,6 @@ void red_disable(struct port *p)
 	p->best = NULL;
 	
 	for (i = 0; i < N_TIMER_FDS; i++) {
-		if (i == FD_ANNOUNCE_TIMER || i == FD_ANNOUNCE_TIMER_B)
-			continue;
 		close(p->fda.fd[FD_FIRST_TIMER + i]);
 	}
 
@@ -533,11 +531,8 @@ void red_disable(struct port *p)
 	red_port_disable(p->red_a);
 	red_port_disable(p->red_b);
 
-	red_clear_fda(p, FD_RTNL);
-	red_clear_fda(p, FD_RTNL_B);
-	clock_fda_changed(p->clock);
-
 	port_clear_fda(p, FD_RTNL);
+	clock_fda_changed(p->clock);
 }
 static int red_set_delay_tmo(struct port *p)
 {
@@ -2281,7 +2276,7 @@ struct port *red_open(const char *phc_device,
 	}
 	red_b->nrate.ratio = 1.0;
 
-	red_clear_fda(p, N_POLLFD);
+	port_clear_fda(p, N_POLLFD);
 	red_port_clear_fda(p->red_a);
 	red_port_clear_fda(p->red_b);
 	p->fault_fd = timerfd_create(CLOCK_MONOTONIC, 0);
@@ -2355,7 +2350,7 @@ void red_close(struct port *p)
 		rtnl_close(p->fda.fd[FD_RTNL]);
 	}
 	if (p->fda.fd[FD_RTNL_B] >= 0) {
-		rtnl_close(p->fda.fd[FD_RTNL]);
+		rtnl_close(p->fda.fd[FD_RTNL_B]);
 	}
 
 	interface_destroy(p->iface);

@@ -42,9 +42,9 @@ enum {
 	FD_ANNOUNCE_TIMER_B, // RED port B
 	FD_FAULT_RED_A, // RED port A
 	FD_FAULT_RED_B, // RED port B
-	FD_RTNL,
 	FD_EVENT_B,   /* RED port B */
 	FD_GENERAL_B, /* RED port B */
+	FD_RTNL,
 	FD_RTNL_B,    /* RED port B */
 	N_POLLFD,
 };
