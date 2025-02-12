@@ -2428,10 +2428,16 @@ int process_pdelay_req(struct port *p, struct ptp_message *m)
 		rsp->header.correction += p->rx_timestamp_offset;
 		rsp->header.reserved2  = m->header.reserved2;
 	} else if (p->dummy_pdelay_resp_fup) {
-		rsp->header.correction += p->tx_timestamp_offset;
-		rsp->header.correction += p->rx_timestamp_offset;
-		rsp->header.reserved2  = m->header.reserved2;
 		rsp->header.flagField[0] |= TWO_STEP;
+		if (p->timestamping == TS_HARDWARE || p->timestamping == TS_SOFTWARE) {
+			rsp->header.correction += p->tx_timestamp_offset;
+			rsp->pdelay_resp.requestReceiptTimestamp =
+				tmv_to_Timestamp(m->hwts.ts);
+		} else {
+			rsp->header.correction += p->tx_timestamp_offset;
+			rsp->header.correction += p->rx_timestamp_offset;
+			rsp->header.reserved2  = m->header.reserved2;
+		}
 	} else {
 		rsp->header.flagField[0] |= TWO_STEP;
 		rsp->pdelay_resp.requestReceiptTimestamp =
@@ -3443,9 +3449,8 @@ struct port *port_open(const char *phc_device,
 		goto err_log_name;
 	}
 
-	if (timestamping == TS_ONESTEP)
-		p->dummy_pdelay_resp_fup =
-			config_get_int(cfg, interface_name(interface), "dummy_pdelay_resp_fup");
+	p->dummy_pdelay_resp_fup =
+		config_get_int(cfg, interface_name(interface), "dummy_pdelay_resp_fup");
 
 	p->phc_index = config_get_int(cfg, interface_name(interface), "phc_index");
 	if (p->phc_index < 0)
