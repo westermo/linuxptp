@@ -1485,10 +1485,16 @@ static int red_port_process_pdelay_req(struct red_port *rp, struct ptp_message *
 		rsp->header.correction += rp->rx_timestamp_offset;
 		rsp->header.reserved2  = m->header.reserved2;
 	} else if (rp->dummy_pdelay_resp_fup) {
-		rsp->header.correction += rp->tx_timestamp_offset;
-		rsp->header.correction += rp->rx_timestamp_offset;
-		rsp->header.reserved2  = m->header.reserved2;
 		rsp->header.flagField[0] |= TWO_STEP;
+		if (rp->upper->timestamping == TS_HARDWARE || rp->upper->timestamping == TS_SOFTWARE) {
+			rsp->header.correction += rp->tx_timestamp_offset;
+			rsp->pdelay_resp.requestReceiptTimestamp =
+				tmv_to_Timestamp(m->hwts.ts);
+		} else {
+			rsp->header.correction += rp->tx_timestamp_offset;
+			rsp->header.correction += rp->rx_timestamp_offset;
+			rsp->header.reserved2  = m->header.reserved2;
+		}
 	} else {
 		rsp->header.flagField[0] |= TWO_STEP;
 		rsp->pdelay_resp.requestReceiptTimestamp =
@@ -2141,14 +2147,12 @@ struct port *red_open(const char *phc_device,
 		goto err_log_name;
 	}
 
-	if (timestamping == TS_ONESTEP) {
-		p->dummy_pdelay_resp_fup =
-			config_get_int(cfg, interface_name(iface_a), "dummy_pdelay_resp_fup");
-		red_a->dummy_pdelay_resp_fup =
-			config_get_int(cfg, interface_name(iface_a), "dummy_pdelay_resp_fup");
-		red_b->dummy_pdelay_resp_fup =
-			config_get_int(cfg, interface_name(iface_b), "dummy_pdelay_resp_fup");
-	}
+	p->dummy_pdelay_resp_fup =
+		config_get_int(cfg, interface_name(iface_a), "dummy_pdelay_resp_fup");
+	red_a->dummy_pdelay_resp_fup =
+		config_get_int(cfg, interface_name(iface_a), "dummy_pdelay_resp_fup");
+	red_b->dummy_pdelay_resp_fup =
+		config_get_int(cfg, interface_name(iface_b), "dummy_pdelay_resp_fup");
 
 	p->jbod = config_get_int(cfg, interface_name(iface_a), "boundary_clock_jbod");
 	p->master_only = config_get_int(cfg, interface_name(iface_a), "serverOnly");
