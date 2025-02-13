@@ -684,9 +684,46 @@ static int red_state_update(struct port *p, enum fsm_event event, int mdiff)
 	return 0;
 }
 
-static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
+static void red_port_tcu_rules(struct red_port *rp, enum port_state next)
 {
 	char cmd[20];
+
+	if (!red_is_transparent(rp->upper))
+		return;
+
+	switch (next) {
+	case PS_INITIALIZING:
+	case PS_LISTENING:
+	case PS_PRE_MASTER:
+	case PS_MASTER:
+	case PS_GRAND_MASTER:
+	case PS_PASSIVE:
+	case PS_SLAVE:
+		snprintf(cmd, sizeof(cmd), "tcu -g %s dis", rp->name);
+		system(cmd);
+		snprintf(cmd, sizeof(cmd), "tcu -d %s dis", rp->name);
+		system(cmd);
+		break;
+	case PS_UNCALIBRATED:
+		snprintf(cmd, sizeof(cmd), "tcu -d %s dis", rp->name);
+		system(cmd);
+		snprintf(cmd, sizeof(cmd), "tcu -g %s ena", rp->name);
+		system(cmd);
+		break;
+	case PS_PASSIVE_SLAVE:
+	case PS_FAULTY:
+	case PS_DISABLED:
+		snprintf(cmd, sizeof(cmd), "tcu -g %s dis", rp->name);
+		system(cmd);
+		snprintf(cmd, sizeof(cmd), "tcu -d %s ena", rp->name);
+		system(cmd);
+		break;
+	};
+
+}
+
+static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
+{
 	if (rp->state == next)
 		return;
 
@@ -698,12 +735,6 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 		break;
 	case PS_FAULTY:
 	case PS_DISABLED:
-		if (red_is_transparent(rp->upper)) {
-			snprintf(cmd, sizeof(cmd), "tcu -T %s dis", rp->name);
-			system(cmd);
-			snprintf(cmd, sizeof(cmd), "tcu -g %s ena", rp->name);
-			system(cmd);
-		}
 		red_port_disable(rp);
 		break;
 	case PS_LISTENING:
@@ -723,32 +754,15 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 	case PS_PASSIVE_SLAVE:
 		red_port_flush_peer_delay(rp);
 		red_port_try_set_anno_tmo(rp);
-		if (red_is_transparent(rp->upper)) {
-			snprintf(cmd, sizeof(cmd), "tcu -T %s dis", rp->name);
-			system(cmd);
-			snprintf(cmd, sizeof(cmd), "tcu -g %s ena", rp->name);
-			system(cmd);
-		}
 		break;
 	case PS_SLAVE:
 		red_port_try_set_anno_tmo(rp);
 		break;
 	};
+
+	red_port_tcu_rules(rp, next);
 	red_port_set_state(rp, next);
 	red_port_notify_event(rp, NOTIFY_PORT_STATE);
-
-	if (red_is_transparent(rp->upper)) {
-		if (next != PS_PASSIVE_SLAVE && next != PS_FAULTY && next != PS_DISABLED) {
-			snprintf(cmd, sizeof(cmd), "tcu -g %s dis", rp->name);
-			system(cmd);
-
-			/* re-enable default TC rule */
-			snprintf(cmd, sizeof(cmd), "tcu -T %s dis", rp->name);
-			system(cmd);
-			snprintf(cmd, sizeof(cmd), "tcu -T %s ena", rp->name);
-			system(cmd);
-		}
-	}
 }
 
 static void red_port_fault(struct red_port *rp)
@@ -2353,6 +2367,9 @@ void red_close(struct port *p)
 	if (red_is_transparent(p)) {
 		system("tcu -g ethA dis");
 		system("tcu -g ethB dis");
+
+		system("tcu -d ethA dis");
+		system("tcu -d ethB dis");
 
 		system("tcu -T ethA dis");
 		system("tcu -T ethB dis");
