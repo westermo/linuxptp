@@ -638,9 +638,13 @@ static int red_state_update(struct port *p, enum fsm_event event, int mdiff)
 	 * 62439-3:2016, it is explicitly "not recommended and not
 	 * further specified".
 	 */
+	/* TODO: Due to mirror ingress rule this is needed as it sees
+	 * the same packets on interlink and the ring. The ingress
+	 * rules in HW needs to be adjusted.
+	 */
 	/* TC should never be PASSIVE */
-	/* if (red_is_transparent(p) && next == PS_PASSIVE) */
-		/* next = PS_MASTER; */
+	if (red_is_transparent(p) && next == PS_PASSIVE)
+		next = PS_MASTER;
 
 	if (PS_FAULTY == next) {
 		struct fault_interval i;
