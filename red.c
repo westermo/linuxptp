@@ -699,7 +699,9 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 	case PS_FAULTY:
 	case PS_DISABLED:
 		if (red_is_transparent(rp->upper)) {
-			snprintf(cmd, sizeof(cmd), "tcu -g %s", rp->name);
+			snprintf(cmd, sizeof(cmd), "tcu -T %s dis", rp->name);
+			system(cmd);
+			snprintf(cmd, sizeof(cmd), "tcu -g %s ena", rp->name);
 			system(cmd);
 		}
 		red_port_disable(rp);
@@ -722,7 +724,9 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 		red_port_flush_peer_delay(rp);
 		red_port_try_set_anno_tmo(rp);
 		if (red_is_transparent(rp->upper)) {
-			snprintf(cmd, sizeof(cmd), "tcu -g %s", rp->name);
+			snprintf(cmd, sizeof(cmd), "tcu -T %s dis", rp->name);
+			system(cmd);
+			snprintf(cmd, sizeof(cmd), "tcu -g %s ena", rp->name);
 			system(cmd);
 		}
 		break;
@@ -735,12 +739,14 @@ static void red_port_p2p_transition(struct red_port *rp, enum port_state next)
 
 	if (red_is_transparent(rp->upper)) {
 		if (next != PS_PASSIVE_SLAVE && next != PS_FAULTY && next != PS_DISABLED) {
-			snprintf(cmd, sizeof(cmd), "tcu -d %s", rp->name);
+			snprintf(cmd, sizeof(cmd), "tcu -g %s dis", rp->name);
 			system(cmd);
 
-			/* restore ptp fwd rules in HW */
-			system("tcu -T dis");
-			system("tcu -T ena");
+			/* re-enable default TC rule */
+			snprintf(cmd, sizeof(cmd), "tcu -T %s dis", rp->name);
+			system(cmd);
+			snprintf(cmd, sizeof(cmd), "tcu -T %s ena", rp->name);
+			system(cmd);
 		}
 	}
 }
@@ -2298,11 +2304,13 @@ struct port *red_open(const char *phc_device,
 
 	if (red_is_boundary(p)) {
 		p->curr_clktype = HWTSTAMP_CLOCK_TYPE_BOUNDARY_CLOCK;
-		system("tcu -g ethA");
-		system("tcu -g ethB");
+		system("tcu -d ethA ena");
+		system("tcu -d ethB ena");
 	} else {
 		p->curr_clktype = HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK;
-		system("tcu -T ena");
+		system("tcu -T ethA ena");
+		system("tcu -T ethB ena");
+		system("tcu -T ethI ena");
 	}
 
 	return p;
@@ -2342,9 +2350,19 @@ err_port:
 
 void red_close(struct port *p)
 {
-	system("tcu -d ethA");
-	system("tcu -d ethB");
-	system("tcu -T dis");
+	if (red_is_transparent(p)) {
+		system("tcu -g ethA dis");
+		system("tcu -g ethB dis");
+
+		system("tcu -T ethA dis");
+		system("tcu -T ethB dis");
+		system("tcu -T ethI dis");
+	}
+
+	if (red_is_boundary(p)) {
+		system("tcu -d ethA dis");
+		system("tcu -d ethB dis");
+	}
 
 	if (port_is_enabled(p)) {
 		red_disable(p);
