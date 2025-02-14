@@ -2668,7 +2668,7 @@ static int red_port_management_fill_response(struct red_port *rp,
 	case MID_PORT_DATA_SET:
 		pds = (struct portDS *) tlv->data;
 		pds->portIdentity            = rp->portIdentity;
-		if (target->state == PS_GRAND_MASTER) {
+		if (rp->state == PS_GRAND_MASTER) {
 			pds->portState = PS_MASTER;
 		} else {
 			pds->portState = rp->state;
@@ -2797,7 +2797,7 @@ static int red_port_management_fill_response(struct red_port *rp,
 	case MID_PORT_PROPERTIES_NP:
 		ppn = (struct port_properties_np *)tlv->data;
 		ppn->portIdentity = rp->portIdentity;
-		if (target->state == PS_GRAND_MASTER)
+		if (rp->state == PS_GRAND_MASTER)
 			ppn->port_state = PS_MASTER;
 		else
 			ppn->port_state = rp->state;
