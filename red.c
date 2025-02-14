@@ -690,7 +690,7 @@ static int red_state_update(struct port *p, enum fsm_event event, int mdiff)
 
 static void red_port_tcu_rules(struct red_port *rp, enum port_state next)
 {
-	char cmd[20];
+	char cmd[50];
 
 	if (!red_is_transparent(rp->upper))
 		return;
@@ -703,23 +703,23 @@ static void red_port_tcu_rules(struct red_port *rp, enum port_state next)
 	case PS_GRAND_MASTER:
 	case PS_PASSIVE:
 	case PS_SLAVE:
-		snprintf(cmd, sizeof(cmd), "tcu -g %s dis", rp->name);
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_accept_interlink %s dis", rp->name);
 		system(cmd);
-		snprintf(cmd, sizeof(cmd), "tcu -d %s dis", rp->name);
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_drop_interlink %s dis", rp->name);
 		system(cmd);
 		break;
 	case PS_UNCALIBRATED:
-		snprintf(cmd, sizeof(cmd), "tcu -d %s dis", rp->name);
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_drop_interlink %s dis", rp->name);
 		system(cmd);
-		snprintf(cmd, sizeof(cmd), "tcu -g %s ena", rp->name);
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_accept_interlink %s ena", rp->name);
 		system(cmd);
 		break;
 	case PS_PASSIVE_SLAVE:
 	case PS_FAULTY:
 	case PS_DISABLED:
-		snprintf(cmd, sizeof(cmd), "tcu -g %s dis", rp->name);
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_accept_interlink %s dis", rp->name);
 		system(cmd);
-		snprintf(cmd, sizeof(cmd), "tcu -d %s ena", rp->name);
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_drop_interlink %s ena", rp->name);
 		system(cmd);
 		break;
 	};
@@ -2320,15 +2320,21 @@ struct port *red_open(const char *phc_device,
 	}
 	p->errorCounter = 0;
 
+	char cmd[50];
 	if (red_is_boundary(p)) {
 		p->curr_clktype = HWTSTAMP_CLOCK_TYPE_BOUNDARY_CLOCK;
-		system("tcu -d ethA ena");
-		system("tcu -d ethB ena");
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_drop_interlink %s ena", p->red_a->name);
+		system(cmd);
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_drop_interlink %s ena", p->red_b->name);
+		system(cmd);
 	} else {
 		p->curr_clktype = HWTSTAMP_CLOCK_TYPE_TRANSPARENT_CLOCK;
-		system("tcu -T ethA ena");
-		system("tcu -T ethB ena");
-		system("tcu -T ethI ena");
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_transparent %s ena", p->red_a->name);
+		system(cmd);
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_transparent %s ena", p->red_b->name);
+		system(cmd);
+		/* TODO: Don't hardcode port name */
+		system("tcu --ptp_transparent ethI ena");
 	}
 
 	return p;
@@ -2368,21 +2374,31 @@ err_port:
 
 void red_close(struct port *p)
 {
+	char cmd[50];
+
 	if (red_is_transparent(p)) {
-		system("tcu -g ethA dis");
-		system("tcu -g ethB dis");
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_accept_interlink %s dis", p->red_a->name);
+		system(cmd);
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_accept_interlink %s dis", p->red_b->name);
+		system(cmd);
 
-		system("tcu -d ethA dis");
-		system("tcu -d ethB dis");
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_drop_interlink %s dis", p->red_a->name);
+		system(cmd);
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_drop_interlink %s dis", p->red_b->name);
+		system(cmd);
 
-		system("tcu -T ethA dis");
-		system("tcu -T ethB dis");
-		system("tcu -T ethI dis");
-	}
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_transparent %s dis", p->red_a->name);
+		system(cmd);
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_transparent %s dis", p->red_b->name);
+		system(cmd);
 
-	if (red_is_boundary(p)) {
-		system("tcu -d ethA dis");
-		system("tcu -d ethB dis");
+		/* TODO: Don't hardcode port name */
+		system("tcu --ptp_transparent ethI dis");
+	} else if (red_is_boundary(p)) {
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_drop_interlink %s dis", p->red_a->name);
+		system(cmd);
+		snprintf(cmd, sizeof(cmd), "tcu --ptp_drop_interlink %s dis", p->red_b->name);
+		system(cmd);
 	}
 
 	if (port_is_enabled(p)) {
