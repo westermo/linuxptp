@@ -1955,10 +1955,14 @@ static enum fsm_event red_event(struct port *p, int fd_index)
 
 	struct red_port *rp = NULL;
 	
-	if (fd_index == FD_EVENT || fd_index == FD_GENERAL)
+	if (fd_index == FD_EVENT || fd_index == FD_GENERAL) {
 		rp = p->red_a;
-	else if (fd_index == FD_EVENT_B || fd_index == FD_GENERAL_B)
+	} else if (fd_index == FD_EVENT_B || fd_index == FD_GENERAL_B) {
 		rp = p->red_b;
+	} else {
+		pr_err("Received event on unknown file descriptor index %d", fd_index);
+		return EV_FAULT_DETECTED;
+	}
 
 	msg = msg_allocate();
 	if (!msg)
@@ -2088,19 +2092,20 @@ struct port *red_open(const char *phc_device,
 	int err, i;
 
 	memset(p, 0, sizeof(*p));
-	TAILQ_INIT(&p->tc_transmitted);
 
 	if (!p) {
 		return NULL;
 	}
+
+	TAILQ_INIT(&p->tc_transmitted);
 	
 	red_a = calloc(1, sizeof(struct red_port));
 	if (!red_a)
-		goto err_red;
+		goto err_port;
 
 	red_b = calloc(1, sizeof(struct red_port));
 	if (!red_b)
-		goto err_red;
+		goto err_port;
 
 	p->red_a = red_a;
 	p->red_b = red_b;
@@ -2328,7 +2333,7 @@ err_log_name:
 		free(red_b->log_name);
 err_iface:
 	free(interface);
-err_red:
+err_port:
 	if (red_a)
 		free(red_a);
 	if (red_b)
@@ -2337,8 +2342,8 @@ err_red:
 		free(iface_a);
 	if (iface_b)
 		free(iface_b);
-err_port:
-	free(p);
+	if (p)
+		free(p);
 	return NULL;
 }
 
