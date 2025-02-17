@@ -828,7 +828,6 @@ static enum servo_state clock_no_adjust(struct clock *c, tmv_t ingress,
 	if (c->tc_syntonize) {
 		// TODO: Use sample-servo with freq and c->freq? They are not timestamps so may need adjusted servo
 		tmp = c->freq - freq;
-		/* pr_info("casan: Prev freq %lf. New freq %lf", c->freq, tmp); */
 		if (tmp > c->max_freq)
 			tmp = c->max_freq;
 		else if (tmp < -c->max_freq)

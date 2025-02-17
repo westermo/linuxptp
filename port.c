@@ -3601,9 +3601,6 @@ struct port *port_open(const char *phc_device,
 		}
 	}
 
-	/* p->hsr_prp_port_a = config_get_int(cfg, p->name, "hsr_prp_port_a"); */
-	/* p->hsr_prp_port_b = config_get_int(cfg, p->name, "hsr_prp_port_b"); */
-
 	p->egress_vlan_tagged = config_get_int(cfg, NULL, "egress_vlan.tagged");
 	if (p->egress_vlan_tagged) {
 		p->egress_vlan_id = config_get_int(cfg, NULL, "egress_vlan.id");
@@ -3727,7 +3724,7 @@ static void port_set_hw_path_delay(struct port *p)
 {
 	Integer64 value;
 
-	if (!clock_is_tc_hw_fwd(p->clock)) // && (!clock_is_hsr(p->clock) || !port_get_paired(p)))
+	if (!clock_is_tc_hw_fwd(p->clock))
 		return;
 
 	/* Include ingr/egr latency for HW forwarded packets.

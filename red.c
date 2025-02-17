@@ -465,17 +465,6 @@ static void red_port_clear_fda(struct red_port *rp)
 	rp->upper->fda.fd[red_anno_fd(rp)] = -1;
 }
 
-/* static void red_clear_fda(struct port *p, int count) */
-/* { */
-/* 	int i; */
-
-/* 	for (i = 0; i < count; i++) { */
-/* 		if (i == FD_ANNOUNCE_TIMER || i == FD_ANNOUNCE_TIMER_B) */
-/* 			continue; */
-/* 		p->fda.fd[i] = -1; */
-/* 	} */
-/* } */
-
 static void red_port_free_foreign_masters(struct red_port *rp)
 {
 	struct foreign_clock *fc;
@@ -680,7 +669,6 @@ static int red_state_update(struct port *p, enum fsm_event event, int mdiff)
 	if (next != p->state) {
 		port_show_transition(p, next, event);
 		p->state = next;
-		/* port_notify_event(p, NOTIFY_PORT_STATE); */
 		p->unicast_state_dirty = true;
 		return 1;
 	}
@@ -1306,7 +1294,7 @@ static void red_port_synchronize(struct red_port *rp,
 			     Integer64 correction1, Integer64 correction2,
 			     Integer8 sync_interval)
 {
-	enum servo_state state; //, last_state;
+	enum servo_state state;
 	tmv_t t1, t1c, t2, c1, c2;
 
 	// TODO: Handle sync RX tmo ???
@@ -1331,7 +1319,6 @@ static void red_port_synchronize(struct red_port *rp,
 		break;
 	}
 
-	/* last_state = clock_servo_state(rp->clock); */
 	state = clock_synchronize(rp->clock, t2, t1c);
 	switch (state) {
 	case SERVO_UNLOCKED:
@@ -1353,7 +1340,6 @@ static void red_port_synchronize(struct red_port *rp,
 		port_dispatch(rp->upper, EV_MASTER_CLOCK_SELECTED, 0);
 		break;
 	case SERVO_LOCKED_STABLE:
-		/* message_interval_request(p, last_state, sync_interval); */
 		port_dispatch(rp->upper, EV_MASTER_CLOCK_SELECTED, 0);
 		break;
 	}
@@ -1460,7 +1446,6 @@ static int red_port_process_pdelay_req(struct red_port *rp, struct ptp_message *
 				rp->log_name,
 				pid2str(&m->header.sourcePortIdentity));
 			rp->peer_portid_valid = 0;
-			/* port_capable(p); */
 		}
 	} else {
 		rp->peer_portid_valid = 1;
@@ -1646,18 +1631,6 @@ calc:
 
 static int red_port_process_pdelay_resp(struct red_port *rp, struct ptp_message *m)
 {
-	/* if (p->peer_delay_resp) { */
-        /*         if (!p->multiple_pdr_detected) { */
-        /*                 pr_err("%s: multiple peer responses", p->log_name); */
-        /*                 p->multiple_pdr_detected = 1; */
-        /*                 p->multiple_seq_pdr_count++; */
-        /*         } */
-        /*         if (p->multiple_seq_pdr_count > p->allowedLostResponses) { */
-        /*                 p->last_fault_type = FT_BAD_PEER_NETWORK; */
-        /*                 return -1; */
-        /*         } */
-        /* } */
-
 	if (!rp->peer_delay_req) {
 		pr_err("%s: rogue peer delay response", rp->log_name);
 		/* Let's not trigger an error on this. It seems to
@@ -2176,9 +2149,6 @@ struct port *red_open(const char *phc_device,
 	red_b->dummy_pdelay_resp_fup =
 		config_get_int(cfg, interface_name(iface_b), "dummy_pdelay_resp_fup");
 
-	/* p->phc_index = config_get_int(cfg, interface_name(interface), "phc_index"); */
-	/* if (p->phc_index < 0) */
-	/* 	p->phc_index = phc_index; */
 	p->jbod = config_get_int(cfg, interface_name(iface_a), "boundary_clock_jbod");
 	p->master_only = config_get_int(cfg, interface_name(iface_a), "serverOnly");
 	p->bmca = config_get_int(cfg, interface_name(iface_a), "BMCA");
@@ -2569,10 +2539,8 @@ static int red_port_management_fill_response(struct red_port *rp,
 	struct port_hwclock_np *phn;
 	struct management_tlv *tlv;
 	struct port_stats_np *psn;
-	/* struct foreign_clock *fc; */
 	struct port_ds_np *pdsnp;
 	struct tlv_extra *extra;
-	/* struct PortIdentity pid; */
 	const char *ts_label;
 	struct portDS *pds;
 	uint16_t u16;
