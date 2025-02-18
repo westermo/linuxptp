@@ -163,6 +163,20 @@ static int clock_resize_pollfd(struct clock *c, int new_nports);
 static void clock_remove_port(struct clock *c, struct port *p);
 static void clock_stats_display(struct clock_stats *s);
 
+static void tc_rules_setup()
+{
+	system("tcu --ptp_transparent ethA ena");
+	system("tcu --ptp_transparent ethB ena");
+	system("tcu --ptp_transparent ethI ena");
+}
+
+static void tc_rules_teardown()
+{
+	system("tcu --ptp_transparent ethA dis");
+	system("tcu --ptp_transparent ethB dis");
+	system("tcu --ptp_transparent ethI dis");
+}
+
 static int clock_alttime_offset_append(struct clock *c, int key, struct ptp_message *m)
 {
 	struct alternate_time_offset_indicator_tlv *atoi;
@@ -349,6 +363,9 @@ void clock_send_notification(struct clock *c, struct ptp_message *msg,
 void clock_destroy(struct clock *c)
 {
 	struct port *p, *tmp;
+
+	if (config_get_int(c->config, NULL, "setup_tc_rules"))
+		tc_rules_teardown();
 
 	interface_destroy(c->uds_rw_if);
 	interface_destroy(c->uds_ro_if);
@@ -1540,6 +1557,9 @@ struct clock *clock_create(enum clock_type type, struct config *config,
 
 	c->hsr_prp_mode = config_get_int(config, NULL, "hsr_prp_mode");
 	c->tc_hw_fwd = config_get_int(config, NULL, "tc_hw_fwd");
+
+	if (config_get_int(config, NULL, "setup_tc_rules"))
+		tc_rules_setup();
 
 	LIST_FOREACH(p, &c->ports, list) {
 		port_dispatch(p, EV_INITIALIZE, 0);
