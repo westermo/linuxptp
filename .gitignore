@@ -11,3 +11,5 @@
 /timemaster
 /ts2phc
 /tz2alt
+.cache/
+compile_commands.json
