@@ -394,6 +394,7 @@ struct config_item config_tab[] = {
 	GLOB_ITEM_INT("setup_tc_rules", 0, 0, 1),
 	GLOB_ITEM_INT("set_process_priority", 0, 0, 1),
 	GLOB_ITEM_INT("tc_hw_fwd", 0, 0, 1),
+	GLOB_ITEM_INT("startup_wait", 0, 0, 60),
 };
 
 static struct unicast_master_table *current_uc_mtab;
