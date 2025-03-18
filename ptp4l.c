@@ -77,6 +77,7 @@ int main(int argc, char *argv[])
 	struct clock *clock = NULL;
 	struct option *opts;
 	struct config *cfg;
+	int startup_wait;
 
 	if (handle_term_signals())
 		return -1;
@@ -190,6 +191,12 @@ int main(int argc, char *argv[])
 
 		/* Set ptp kworker priority */
 		system("pgrep -f \"ptp[0-9]+$\" | xargs -I {} chrt -f -p 75 {}");
+	}
+
+	startup_wait = config_get_int(cfg, NULL, "startup_wait");
+	if (startup_wait) {
+		pr_notice("delaying startup by %d seconds", startup_wait);
+		sleep(startup_wait);
 	}
 
 	print_set_progname(progname);

@@ -604,6 +604,7 @@ int main(int argc, char *argv[])
 	struct interface *iface;
 	int gpio_sleep_us = 0;
 	struct option *opts;
+	int startup_wait;
 	int autocfg = 0;
 
 	handle_term_signals();
@@ -698,6 +699,12 @@ int main(int argc, char *argv[])
 		struct sched_param schedp = { .sched_priority = 49 };
 		if (sched_setscheduler(0, SCHED_FIFO, &schedp))
 			pr_err("Failed raising ts2phc priority: %m");
+	}
+
+	startup_wait = config_get_int(cfg, NULL, "startup_wait");
+	if (startup_wait) {
+		pr_notice("delaying startup by %d seconds", startup_wait);
+		sleep(startup_wait);
 	}
 
 	print_set_progname(progname);
