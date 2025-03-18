@@ -80,8 +80,16 @@ static enum port_state ts2phc_clock_compute_state(struct ts2phc_private *priv,
 		 * after that, PS_MASTER is third, PS_PRE_MASTER fourth and
 		 * all of that overrides PS_DISABLED, which corresponds
 		 * nicely with the numerical values */
-		if (p->state > state)
+		if (p->state > state) {
+			/* PASSIVE_SLAVE is numerically highest. This
+			 * check is to ensure it's prioritized only
+			 * above DISABLED.
+			 */
+			if (p->state == PS_PASSIVE_SLAVE && state != PS_DISABLED)
+				continue;
+
 			state = p->state;
+		}
 	}
 	return state;
 }

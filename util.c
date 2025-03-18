@@ -215,6 +215,7 @@ enum port_state port_state_normalize(enum port_state state)
 	case PS_SLAVE:
 	case PS_PRE_MASTER:
 	case PS_UNCALIBRATED:
+	case PS_PASSIVE_SLAVE:
 		return state;
 	default:
 		return PS_DISABLED;
