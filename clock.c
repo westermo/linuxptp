@@ -1731,10 +1731,9 @@ static void clock_forward_mgmt_msg(struct clock *c, struct port *p, struct ptp_m
 		}
 		if (clock_do_forward_mgmt(c, p, c->uds_rw_port, msg, &msg_ready))
 			pr_debug("uds port: management forward failed");
-		if (msg_ready) {
+		if (msg_ready)
 			msg_post_recv(msg, pdulen);
-			msg->management.boundaryHops++;
-		}
+		msg->management.boundaryHops++;
 	}
 }
 
