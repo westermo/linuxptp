@@ -92,6 +92,11 @@ struct hwtstamp_config {
 	int delay_mechanism;
 };
 
+/* SIOCSMEANPATHDELAY */
+struct mean_path_delay {
+	__s64 path_delay;
+};
+
 /* possible values for hwtstamp_config->flags */
 enum hwtstamp_flags {
 	/*

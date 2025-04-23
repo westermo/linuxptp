@@ -3695,24 +3695,20 @@ void port_update_unicast_state(struct port *p)
 
 void port_write_hw_path_delay(const char *ifname, int ev_fd, Integer64 delay_ns)
 {
-#ifdef HAS_ETHTOOL_MEAN_PATH_DELAY
-	struct {
-		struct ethtool_tunable fld;
-		__s64 mean_path_delay;
-	} cont;
+#ifdef SIOCSMEANPATHDELAY
+	struct mean_path_delay mpd;
 	struct ifreq ifr;
 	int err;
 
-	cont.fld.cmd = ETHTOOL_PHY_STUNABLE;
-	cont.fld.id = ETHTOOL_PHY_MEAN_PATH_DELAY;
-	cont.fld.type_id = ETHTOOL_TUNABLE_S64;
-	cont.fld.len = 8;
-	cont.mean_path_delay = delay_ns;
+	/* init_ifreq */
+	memset(&ifr, 0, sizeof(ifr));
+	memset(&mpd, 0, sizeof(mpd));
+	strncpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name) - 1);
+	ifr.ifr_data = (void *) &mpd;
 
-	ifr.ifr_data = (char*) &cont.fld;
-	strncpy(ifr.ifr_name, ifname, ETH_ALEN);
+	mpd.path_delay = delay_ns;
 
-	err = ioctl(ev_fd, SIOCETHTOOL, &ifr);
+	err = ioctl(ev_fd, SIOCSMEANPATHDELAY, &ifr);
 	if (err < 0) {
 		pr_err("Cannot Set PHY Mean Path Delay for %s: %m", ifname);
 	}
@@ -3734,7 +3730,6 @@ static void port_set_hw_path_delay(struct port *p)
 		+ (p->rx_timestamp_offset >> 16)
 		+ (p->tx_timestamp_offset >> 16);
 
-	/* Just use the event file descriptor */
 	port_write_hw_path_delay(p->name, p->fda.fd[FD_EVENT], value);
 }
 
