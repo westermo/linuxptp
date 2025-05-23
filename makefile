@@ -20,9 +20,9 @@ KBUILD_OUTPUT ?=
 DEBUG	=
 CC	= $(CROSS_COMPILE)gcc
 VER     = -DVER=$(version)
-CFLAGS	= -Wall $(VER) $(incdefs) $(DEBUG) $(EXTRA_CFLAGS)
+CFLAGS	= -Wall $(VER) $(incdefs) $(DEBUG) $(EXTRA_CFLAGS) -g
 LDLIBS	= -lm -lrt -pthread -lgpiod $(EXTRA_LDFLAGS)
-PRG	= ptp4l hwstamp_ctl nsm phc2sys phc_ctl pmc timemaster ts2phc tz2alt
+PRG	= ptp4l hwstamp_ctl nsm phc2sys phc_ctl pmc timemaster ts2phc tz2alt ptpmon
 FILTERS	= filter.o mave.o mmedian.o
 SERVOS	= linreg.o ntpshm.o nullf.o pi.o refclock_sock.o servo.o
 TRANSP	= raw.o transport.o udp.o udp6.o uds.o
@@ -35,7 +35,7 @@ OBJ	= bmc.o clock.o clockadj.o clockcheck.o config.o designated_fsm.o \
  unicast_fsm.o unicast_service.o util.o version.o red.o tcp_uds.o
 
 OBJECTS	= $(OBJ) hwstamp_ctl.o nsm.o phc2sys.o phc_ctl.o pmc.o pmc_agent.o \
- pmc_common.o sysoff.o timemaster.o $(TS2PHC) tz2alt.o
+ pmc_common.o sysoff.o timemaster.o $(TS2PHC) tz2alt.o ptpmon.o
 SRC	= $(OBJECTS:.o=.c)
 DEPEND	= $(OBJECTS:.o=.d)
 srcdir	:= $(dir $(lastword $(MAKEFILE_LIST)))
@@ -75,6 +75,10 @@ ts2phc: config.o clockadj.o hash.o interface.o msg.o phc.o pmc_agent.o \
 tz2alt: config.o hash.o interface.o lstab.o msg.o phc.o pmc_common.o print.o \
  sk.o tlv.o $(TRANSP) tz2alt.o util.o version.o
 
+ptpmon: config.o hash.o interface.o msg.o pmc_agent.o phc.o \
+ pmc_common.o print.o sk.o tlv.o transport.o raw.o udp.o udp6.o \
+ uds.o util.o version.o ptpmon.o
+
 version.o: .version version.sh $(filter-out version.d,$(DEPEND))
 
 .version: force
@@ -87,9 +91,9 @@ force:
 install: $(PRG)
 	install -p -m 755 -d $(DESTDIR)$(sbindir) $(DESTDIR)$(man8dir)
 	install $(PRG) $(DESTDIR)$(sbindir)
-	for x in $(PRG:%=%.8); do \
-		[ -f $$x ] && install -p -m 644 -t $(DESTDIR)$(man8dir) $$x ; \
-	done
+	# for x in $(PRG:%=%.8); do \
+	# 	[ -f $$x ] && install -p -m 644 -t $(DESTDIR)$(man8dir) $$x ; \
+	# done
 
 clean:
 	rm -f $(OBJECTS) $(DEPEND) $(PRG)

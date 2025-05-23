@@ -449,3 +449,144 @@ bool pmc_agent_utc_offset_traceable(struct pmc_agent *agent)
 {
 	return agent->utc_offset_traceable;
 }
+
+static void send_subscription_all(struct pmc_agent *node)
+{
+	struct subscribe_events_np sen;
+
+	memset(&sen, 0, sizeof(sen));
+	sen.duration = UPDATES_PER_SUBSCRIPTION * node->update_interval;
+	event_bitmask_set(sen.bitmask, NOTIFY_PORT_STATE, TRUE);
+	event_bitmask_set(sen.bitmask, NOTIFY_TIME_SYNC, TRUE);
+	event_bitmask_set(sen.bitmask, NOTIFY_PORT_STATE, TRUE);
+	pmc_send_set_action(node->pmc, MID_SUBSCRIBE_EVENTS_NP, &sen, sizeof(sen));
+}
+
+void send_unsubscribe_all(struct pmc_agent *node)
+{
+	struct subscribe_events_np sen;
+
+	memset(&sen, 0, sizeof(sen));
+	sen.duration = UPDATES_PER_SUBSCRIPTION * node->update_interval;
+	pmc_send_set_action(node->pmc, MID_SUBSCRIBE_EVENTS_NP, &sen, sizeof(sen));
+}
+
+static int run_pmc_subscribe_all(struct pmc_agent *node, int timeout, int ds_id,
+				 struct ptp_message **msg)
+{
+#define N_FD 1
+	struct pollfd pollfd[N_FD];
+	int cnt, res;
+
+	while (1) {
+		pollfd[0].fd = pmc_get_transport_fd(node->pmc);
+		pollfd[0].events = POLLIN|POLLPRI;
+		if (!node->pmc_ds_requested && ds_id >= 0)
+			pollfd[0].events |= POLLOUT;
+
+		cnt = poll(pollfd, N_FD, timeout);
+		if (cnt < 0) {
+			pr_err("poll failed");
+			return RUN_PMC_INTR;
+		}
+		if (!cnt) {
+			/* Request the data set again in the next run. */
+			node->pmc_ds_requested = 0;
+			return RUN_PMC_TMO;
+		}
+
+		/* Send a new request if there are no pending messages. */
+		if ((pollfd[0].revents & POLLOUT) &&
+		    !(pollfd[0].revents & (POLLIN|POLLPRI))) {
+			switch (ds_id) {
+			case MID_SUBSCRIBE_EVENTS_NP:
+				send_subscription_all(node);
+				break;
+			default:
+				pmc_send_get_action(node->pmc, ds_id);
+				break;
+			}
+			node->pmc_ds_requested = 1;
+		}
+
+		if (!(pollfd[0].revents & (POLLIN|POLLPRI)))
+			continue;
+
+		*msg = pmc_recv(node->pmc);
+
+		if (!*msg)
+			continue;
+
+		if (!check_clock_identity(node, *msg)) {
+			msg_put(*msg);
+			*msg = NULL;
+			continue;
+		}
+
+		res = is_msg_mgt(*msg);
+		if (res < 0 && get_mgt_err_id(*msg) == ds_id) {
+			node->pmc_ds_requested = 0;
+			return RUN_PMC_NODEV;
+		}
+		if (res <= 0 ||
+		    node->recv_subscribed(node->recv_context, *msg, ds_id) ||
+		    management_tlv_id(*msg) != ds_id) {
+			msg_put(*msg);
+			*msg = NULL;
+			continue;
+		}
+		node->pmc_ds_requested = 0;
+		return RUN_PMC_OKAY;
+	}
+}
+
+static int renew_subscription_all(struct pmc_agent *node, int timeout)
+{
+	struct ptp_message *msg;
+	int res;
+
+	res = run_pmc_subscribe_all(node, timeout, MID_SUBSCRIBE_EVENTS_NP, &msg);
+	if (is_run_pmc_error(res)) {
+		return run_pmc_err2errno(res);
+	}
+	msg_put(msg);
+	return 0;
+}
+
+int pmc_agent_subscribe_all(struct pmc_agent *node, int timeout, int interval)
+{
+	node->stay_subscribed = true;
+	if (interval < MIN_UPDATE_INTERVAL)
+		interval = MIN_UPDATE_INTERVAL;
+	node->update_interval = interval * NS_PER_SEC;
+	return renew_subscription_all(node, timeout);
+}
+
+int pmc_agent_update_subscribe_all(struct pmc_agent *node)
+{
+	struct ptp_message *msg;
+	struct timespec tp;
+	uint64_t ts;
+
+	if (!node->pmc) {
+		return 0;
+	}
+	if (clock_gettime(CLOCK_MONOTONIC, &tp)) {
+		pr_err("failed to read clock: %m");
+		return -errno;
+	}
+	ts = tp.tv_sec * NS_PER_SEC + tp.tv_nsec;
+
+	if (ts - node->pmc_last_update >= node->update_interval) {
+		if (node->stay_subscribed) {
+			renew_subscription_all(node, 0);
+		}
+		if (!pmc_agent_query_utc_offset(node, 0)) {
+			node->pmc_last_update = ts;
+		}
+	}
+
+	run_pmc(node, 0, -1, &msg);
+
+	return 0;
+}

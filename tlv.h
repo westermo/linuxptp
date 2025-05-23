@@ -379,6 +379,8 @@ struct msg_interval_req_tlv {
 struct time_status_np {
 	int64_t       master_offset; /*nanoseconds*/
 	int64_t       ingress_time;  /*nanoseconds*/
+	int64_t       mean_path_delay;  /*nanoseconds*/
+	uint16_t      last_sync_seqid;
 	Integer32     cumulativeScaledRateOffset;
 	Integer32     scaledLastGmPhaseChange;
 	UInteger16    gmTimeBaseIndicator;

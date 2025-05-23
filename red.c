@@ -1319,7 +1319,7 @@ static void red_port_synchronize(struct red_port *rp,
 		break;
 	}
 
-	state = clock_synchronize(rp->clock, t2, t1c);
+	state = clock_synchronize(rp->clock, t2, t1c, seqid);
 	switch (state) {
 	case SERVO_UNLOCKED:
 		port_dispatch(rp->upper, EV_SYNCHRONIZATION_FAULT, 0);

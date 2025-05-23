@@ -501,6 +501,8 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 		fprintf(fp, "TIME_STATUS_NP "
 			IFMT "master_offset              %" PRId64
 			IFMT "ingress_time               %" PRId64
+			IFMT "mean_path_delay            %" PRId64
+			IFMT "last_sync_seqid            %" PRIu16
 			IFMT "cumulativeScaledRateOffset %+.9f"
 			IFMT "scaledLastGmPhaseChange    %d"
 			IFMT "gmTimeBaseIndicator        %hu"
@@ -509,6 +511,8 @@ static void pmc_show(struct ptp_message *msg, FILE *fp)
 			IFMT "gmIdentity                 %s",
 			tsn->master_offset,
 			tsn->ingress_time,
+			tsn->mean_path_delay,
+			tsn->last_sync_seqid,
 			(tsn->cumulativeScaledRateOffset + 0.0) / P41,
 			tsn->scaledLastGmPhaseChange,
 			tsn->gmTimeBaseIndicator,

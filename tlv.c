@@ -381,6 +381,8 @@ static int mgt_post_recv(struct management_tlv *m, uint16_t data_len,
 		tsn = (struct time_status_np *) m->data;
 		tsn->master_offset = net2host64(tsn->master_offset);
 		tsn->ingress_time = net2host64(tsn->ingress_time);
+		tsn->mean_path_delay = net2host64(tsn->mean_path_delay);
+		tsn->last_sync_seqid = ntohs(tsn->last_sync_seqid);
 		tsn->cumulativeScaledRateOffset = ntohl(tsn->cumulativeScaledRateOffset);
 		tsn->scaledLastGmPhaseChange = ntohl(tsn->scaledLastGmPhaseChange);
 		tsn->gmTimeBaseIndicator = ntohs(tsn->gmTimeBaseIndicator);
@@ -650,6 +652,8 @@ static void mgt_pre_send(struct management_tlv *m, struct tlv_extra *extra)
 		tsn = (struct time_status_np *) m->data;
 		tsn->master_offset = host2net64(tsn->master_offset);
 		tsn->ingress_time = host2net64(tsn->ingress_time);
+		tsn->mean_path_delay = host2net64(tsn->mean_path_delay);
+		tsn->last_sync_seqid = htons(tsn->last_sync_seqid);
 		tsn->cumulativeScaledRateOffset = htonl(tsn->cumulativeScaledRateOffset);
 		tsn->scaledLastGmPhaseChange = htonl(tsn->scaledLastGmPhaseChange);
 		tsn->gmTimeBaseIndicator = htons(tsn->gmTimeBaseIndicator);

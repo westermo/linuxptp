@@ -181,4 +181,9 @@ int pmc_agent_is_subscribed(struct pmc_agent *agent);
  */
 bool pmc_agent_utc_offset_traceable(struct pmc_agent *agent);
 
+/* Subscribe to all events instead of just port states */
+int pmc_agent_subscribe_all(struct pmc_agent *node, int timeout, int interval);
+int pmc_agent_update_subscribe_all(struct pmc_agent *node);
+void send_unsubscribe_all(struct pmc_agent *node);
+
 #endif

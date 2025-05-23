@@ -34,6 +34,7 @@
 #include "filter.h"
 #include "missing.h"
 #include "msg.h"
+#include "pdt.h"
 #include "phc.h"
 #include "port.h"
 #include "servo.h"
@@ -133,6 +134,7 @@ struct clock {
 	tmv_t master_offset;
 	tmv_t path_delay;
 	tmv_t ingress_ts;
+	uint16_t last_sync_seqid;
 	tmv_t initial_delay;
 	struct tsproc *tsproc;
 	struct freq_estimator fest;
@@ -588,6 +590,8 @@ static int clock_management_fill_response(struct clock *c, struct port *p,
 		tsn = (struct time_status_np *) tlv->data;
 		tsn->master_offset = tmv_to_nanoseconds(c->master_offset);
 		tsn->ingress_time = tmv_to_nanoseconds(c->ingress_ts);
+		tsn->mean_path_delay = tmv_to_nanoseconds(c->path_delay);
+		tsn->last_sync_seqid = c->last_sync_seqid;
 		tsn->cumulativeScaledRateOffset =
 			(Integer32) (c->status.cumulativeScaledRateOffset +
 				      c->nrr * POW2_41 - POW2_41);
@@ -734,6 +738,7 @@ static int clock_management_set(struct clock *c, struct port *p,
 		break;
 	case MID_SUBSCRIBE_EVENTS_NP:
 		sen = (struct subscribe_events_np *)tlv->data;
+		pr_err("Got subscriber. Bitmask %x\n", sen->bitmask[0]);
 		clock_update_subscription(c, req, sen->bitmask, sen->duration);
 		respond = 1;
 		break;
@@ -2150,7 +2155,7 @@ static int clock_synchronize_locked(struct clock *c, double adj)
 	return 0;
 }
 
-enum servo_state clock_synchronize(struct clock *c, tmv_t ingress, tmv_t origin)
+enum servo_state clock_synchronize(struct clock *c, tmv_t ingress, tmv_t origin, uint16_t seqid)
 {
 	enum servo_state state = SERVO_UNLOCKED;
 	double adj, weight;
@@ -2165,6 +2170,7 @@ enum servo_state clock_synchronize(struct clock *c, tmv_t ingress, tmv_t origin)
 	}
 
 	c->ingress_ts = ingress;
+	c->last_sync_seqid = seqid;
 
 	tsproc_down_ts(c->tsproc, origin, ingress);
 

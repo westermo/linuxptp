@@ -1459,7 +1459,7 @@ static void port_synchronize(struct port *p,
 	}
 
 	last_state = clock_servo_state(p->clock);
-	state = clock_synchronize(p->clock, t2, t1c);
+	state = clock_synchronize(p->clock, t2, t1c, seqid);
 	switch (state) {
 	case SERVO_UNLOCKED:
 		port_dispatch(p, EV_SYNCHRONIZATION_FAULT, 0);
