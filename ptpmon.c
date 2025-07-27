@@ -6,6 +6,7 @@
  */
 
 #include <arpa/inet.h>
+#include <bits/time.h>
 #include <errno.h>
 #include <net/if.h>
 #include <stdint.h>
@@ -13,8 +14,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <signal.h>
 
-/* #include "config.h" */
 #include "config.h"
 #include "print.h"
 #include "tlv.h"
@@ -24,15 +25,15 @@
 #include "pmc_agent.h"
 
 #define MAX_AGENTS 30
+#define BUF_SIZE 1000
 
 /*
   
---relative-to /var/run/ptp4l-eth3  # Listen to socket and use as reference
--i /var/run/ptp4l                  # Listen to socket
--i /var/run/ptp4l-eth4             # Listen to socket
+-r/--relative-to /var/run/ptp4l-eth3  # Listen to socket and use as reference
 -t/--target 198.18.100.1           # Send information to remote destination
+-o/--output /tmp/output.txt        # Log all output to a file
 -d/--domain 254                    # ptp4l domain
--n/--name                          # Instance name
+-n/--name eth4                     # Instance name. Listen to socket on /var/run/ptp-eth4
 
 --only-sync                        # Only send sync status
 --only-states                      # Only send port transitions
@@ -58,7 +59,8 @@ Send and log as "dut-a:eth3"
 
 If an instances has multiple ports (when reporting state transitions),
 only report the PortIdentity. Skip converting to actual name as we
-would have to query PORT_DATA_SET_NP.
+would have to query PORT_DATA_SET_NP. Though querying that would
+usually be a one-time thing.
 
 */
 
@@ -87,6 +89,7 @@ struct ptpmon {
 	struct sockaddr_in server;
 	uint16_t tcp_port;
 	int target_socket;
+	FILE *target_file;
 	/* char *name; */
 	LIST_HEAD(agents_head, ptpmon_agent) agents;
 };
@@ -98,31 +101,56 @@ static void ptpmon_cleanup(struct ptpmon *priv)
 	if (priv->cfg)
 		config_destroy(priv->cfg);
 
+	if (priv->target_file)
+		fclose(priv->target_file);
+
 	LIST_FOREACH(pm_agent, &priv->agents, list) {
 		printf("Destroying\n");
 		pmc_agent_destroy(pm_agent->agent);
 		config_destroy(pm_agent->cfg);
 	}
+}
 
-	/* if (priv->agent) */
-		/* pmc_agent_destroy(priv->agent); */
+static int ptpmon_connect_to_server(struct ptpmon *priv)
+{
+	if (priv->target_socket >= 0)
+		close(priv->target_socket);
+
+	priv->target_socket = socket(AF_INET, SOCK_STREAM, 0);
+	if (priv->target_socket == -1) {
+		pr_err("Socket creation failed...");
+		return -1;
+	}
+
+	if (connect(priv->target_socket, &priv->server, sizeof(struct sockaddr_in)) != 0) {
+		pr_err("Connection with the server failed...");
+		return -1;
+	} else {
+		pr_err("Connected to the server..");
+	}
+	return 0;
 }
 
 static int ptpmon_recv_subscribed(void *context, struct ptp_message *msg,
 				  int excluded)
 {
 	struct ptpmon_agent *agent = context;
+	struct ptpmon *priv = agent->ptpmon;
 	/* struct portDS *pds; */
 	struct time_status_np *tsn;
+	char buf[BUF_SIZE];
+	struct timespec ts;
+	/* char *ptr; */
 	int64_t sec, nsec;
 	int mgt_id;
+	int bytes;
 	
 
 	mgt_id = management_tlv_id(msg);
 	if (mgt_id == excluded)
 		return 0;
 
-	pr_info("Name: %s", agent->name);
+	/* pr_info("Name: %s", agent->name); */
 
 	switch (mgt_id) {
 	case MID_PORT_DATA_SET:
@@ -150,18 +178,26 @@ static int ptpmon_recv_subscribed(void *context, struct ptp_message *msg,
 		tsn = management_tlv_data(msg);
 		sec = tsn->ingress_time / NSEC_PER_SEC;
 		nsec = tsn->ingress_time % NSEC_PER_SEC;
-		pr_info("GmIdentity %s. IngressTime %"PRId64".%09"PRId64". SyncSeq %5"PRIu16". Offset %10"PRId64". PathDelay %10"PRId64"",
-		       cid2str(&tsn->gmIdentity), sec, nsec, tsn->last_sync_seqid, tsn->master_offset, tsn->mean_path_delay);
-		char *ptr;
-		int bytes;
-		// +++ adds a new line because otherwise server fails to parse the name
-		// TODO: replace with fixed-size array
-		bytes = asprintf(&ptr, "+++++\nname %s\ngm_identity %s\ningr_time %"PRId64"\nlast_sync_seq %"PRIu16"\noffset %"PRId64"\npath_delay %"PRId64"\n\n",
-		       agent->name, cid2str(&tsn->gmIdentity), tsn->ingress_time, tsn->last_sync_seqid, tsn->master_offset, tsn->mean_path_delay);
-		if (ptr) {
-			write(agent->ptpmon->target_socket, ptr, bytes);
-			free(ptr);
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		bytes = snprintf(buf, BUF_SIZE, "{\"systime\": \"%lld.%.9ld\", \"name\": \"%s\", \"gm_identity\": \"%s\", \"ingr_time\": \"%"PRId64".%.9ld\", \"last_sync_seq\" %"PRIu16", \"offset\" %"PRId64", \"path_delay\": %"PRId64"}\n",
+(long long) ts.tv_sec, ts.tv_nsec, agent->name, cid2str(&tsn->gmIdentity), sec, nsec, tsn->last_sync_seqid, tsn->master_offset, tsn->mean_path_delay);
+		if (bytes >= BUF_SIZE) {
+			pr_err("Buffer truncated when formatting string");
+			pr_err("%s", buf);
+		} else {
+			pr_info("%s", buf);
 		}
+
+		if (priv->target_socket >= 0) {
+			bytes = write(agent->ptpmon->target_socket, buf, bytes);
+			if (bytes < 0) {
+				pr_err("Error sending to remote: %m. Attempting reconnect");
+				ptpmon_connect_to_server(agent->ptpmon);
+			}
+		}
+
+		if (agent->ptpmon->target_file)
+			fputs(buf, agent->ptpmon->target_file);
 
 		return 1;
 	case MID_PARENT_DATA_SET:
@@ -198,7 +234,7 @@ int main(int argc, char *argv[])
 	struct config *cfg = NULL;
 	/* struct pmc_agent *agent; */
 	struct option *opts;
-	struct ptpmon priv;
+	struct ptpmon priv = { 0 };
 	/* char *paths_list[MAX_AGENTS]; */
 	/* int paths_count = 0; */
 	char *names_list[MAX_AGENTS];
@@ -216,12 +252,14 @@ int main(int argc, char *argv[])
 	}
 
 	priv.cfg = cfg;
+	priv.target_socket = -1;
+	priv.tcp_port = 9876;
 
 	opts = config_long_options(cfg);
 
 	progname = strrchr(argv[0], '/');
 	progname = progname ? 1 + progname : argv[0];
-	while (EOF != (c = getopt_long(argc, argv, "d:i:f:hl:mqs:vn:t:", opts, &index))) {
+	while (EOF != (c = getopt_long(argc, argv, "d:i:f:hl:mqs:vn:t:o:p:", opts, &index))) {
 		switch (c) {
 		case 0:
 			if (config_parse_option(cfg, opts[index].name, optarg)) {
@@ -256,6 +294,13 @@ int main(int argc, char *argv[])
 		/* 	config_set_int(cfg, "use_syslog", 0); */
 		/* 	print_set_syslog(0); */
 		/* 	break; */
+		case 'o':
+			priv.target_file = fopen(optarg, "w");
+			if (!priv.target_file) {
+				pr_err("Failed to open file '%s'", optarg);
+				return -1;
+			}
+			break;
 		case 'd':
 			if (config_set_int(cfg, "domainNumber", atoi(optarg))) {
 				return -1;
@@ -270,6 +315,11 @@ int main(int argc, char *argv[])
 		/* 	break; */
 		case 't':
 			ip = optarg;
+			if (strncmp(ip, "localhost", 9) == 0)
+				ip = "127.0.0.1";
+			break;
+		case 'p':
+			priv.tcp_port = atoi(optarg);
 			break;
 		case 'v':
 			ptpmon_cleanup(&priv);
@@ -282,6 +332,7 @@ int main(int argc, char *argv[])
 		case '?':
 		default:
 			ptpmon_cleanup(&priv);
+			pr_err("Unknown option %c", c);
 			/* usage(progname); */
 			return -1;
 		}
@@ -299,32 +350,27 @@ int main(int argc, char *argv[])
 	print_set_verbose(config_get_int(cfg, NULL, "verbose"));
 	print_set_syslog(config_get_int(cfg, NULL, "use_syslog"));
 	print_set_level(config_get_int(cfg, NULL, "logging_level"));
-	
+
 	LIST_INIT(&priv.agents);
 	
-	priv.target_socket = socket(AF_INET, SOCK_STREAM, 0);
-	if (priv.target_socket == -1) {
-		printf("socket creation failed...\n");
+	/* Override SIGPIPE action that happens when remote disconnects a socket */
+	struct sigaction new_actn, old_actn;
+	new_actn.sa_handler = SIG_IGN;
+	sigemptyset (&new_actn.sa_mask);
+	new_actn.sa_flags = 0;
+	sigaction (SIGPIPE, &new_actn, &old_actn);
+
+	if (ip == NULL && priv.target_file == NULL) {
+		pr_err("No output selected. Please set remote IP and/or filename");
 		goto out;
-	} else {
-		printf("Socket successfully created..\n");
 	}
-	
-	if (ip == NULL)
-		ip = "127.0.0.1";
-	// TODO: make configurable
-	priv.tcp_port = 9876;
+
 	priv.server.sin_family = AF_INET;
 	priv.server.sin_port = htons(priv.tcp_port);
 	priv.server.sin_addr.s_addr = inet_addr(ip);
-
-	if (connect(priv.target_socket, &priv.server, sizeof(struct sockaddr_in)) != 0) {
-		printf("connection with the server failed...\n");
-		goto out;
-	} else {
-		printf("connected to the server..\n");
-	}
 	
+	ptpmon_connect_to_server(&priv);
+
 	/* TODO: handle files properly */
 	for (int i = 0; i < names_count; i++) {
 		pm_agent = calloc(1, sizeof(struct ptpmon_agent));
