@@ -98,6 +98,7 @@ static void ptpmon_cleanup(struct ptpmon *priv)
 {
 	struct ptpmon_agent *pm_agent;
 
+	pr_info("Destroying\n");
 	if (priv->cfg)
 		config_destroy(priv->cfg);
 
@@ -105,7 +106,6 @@ static void ptpmon_cleanup(struct ptpmon *priv)
 		fclose(priv->target_file);
 
 	LIST_FOREACH(pm_agent, &priv->agents, list) {
-		printf("Destroying\n");
 		pmc_agent_destroy(pm_agent->agent);
 		config_destroy(pm_agent->cfg);
 	}
@@ -179,7 +179,7 @@ static int ptpmon_recv_subscribed(void *context, struct ptp_message *msg,
 		sec = tsn->ingress_time / NSEC_PER_SEC;
 		nsec = tsn->ingress_time % NSEC_PER_SEC;
 		clock_gettime(CLOCK_MONOTONIC, &ts);
-		bytes = snprintf(buf, BUF_SIZE, "{\"systime\": \"%lld.%.9ld\", \"name\": \"%s\", \"gm_identity\": \"%s\", \"ingr_time\": \"%"PRId64".%.9ld\", \"last_sync_seq\" %"PRIu16", \"offset\" %"PRId64", \"path_delay\": %"PRId64"}\n",
+		bytes = snprintf(buf, BUF_SIZE, "{\"systime\": \"%lld.%.9ld\", \"name\": \"%s\", \"gm_identity\": \"%s\", \"ingr_time\": \"%"PRId64".%.9ld\", \"last_sync_seq\": %"PRIu16", \"offset\": %"PRId64", \"path_delay\": %"PRId64"}\n",
 (long long) ts.tv_sec, ts.tv_nsec, agent->name, cid2str(&tsn->gmIdentity), sec, nsec, tsn->last_sync_seqid, tsn->master_offset, tsn->mean_path_delay);
 		if (bytes >= BUF_SIZE) {
 			pr_err("Buffer truncated when formatting string");
