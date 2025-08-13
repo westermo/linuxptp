@@ -94,6 +94,21 @@ struct ptpmon {
 	LIST_HEAD(agents_head, ptpmon_agent) agents;
 };
 
+static void usage()
+{
+	fprintf(stderr,
+		"\nusage: ptpmon [options]\n\n"
+		" -n <port> port to monitor, can be repeated\n"
+		" -t <IP>   send data to remote TCP server\n"
+		" -o <file> write data to file\n"
+		" -d <num>  set PTP domain\n"
+		" -l <num>  set the logging level to 'num'\n"
+		" -m        print messages to stdout\n"
+		" -v        prints the software version and exits\n"
+		" -h        prints this message and exits\n"
+		"\n");
+}
+
 static void ptpmon_cleanup(struct ptpmon *priv)
 {
 	struct ptpmon_agent *pm_agent;
@@ -327,13 +342,13 @@ int main(int argc, char *argv[])
 			return 0;
 		case 'h':
 			ptpmon_cleanup(&priv);
-			/* usage(progname); */
+			usage();
 			return -1;
 		case '?':
 		default:
 			ptpmon_cleanup(&priv);
 			pr_err("Unknown option %c", c);
-			/* usage(progname); */
+			usage();
 			return -1;
 		}
 	}
