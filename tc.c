@@ -21,6 +21,7 @@
 #include "port.h"
 #include "print.h"
 #include "tc.h"
+#include "red.h"
 #include "tmv.h"
 
 enum tc_match {
@@ -490,6 +491,7 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 	uint16_t steps_removed;
 	struct port *p;
 	int cnt;
+	int err;
 
 	if (q->tc_spanning_tree && msg_type(msg) == ANNOUNCE) {
 		steps_removed = ntohs(msg->announce.stepsRemoved);
@@ -509,7 +511,12 @@ int tc_forward(struct port *q, struct ptp_message *msg)
 		if (tc_blocked(q, p, msg)) {
 			continue;
 		}
-		cnt = transport_send(p->trp, &p->fda, TRANS_GENERAL, msg);
+		if (port_is_red(p)) { /* Forwarding from UDS to RED ports */
+			err = red_send(p, msg);
+			cnt = (err == 0); /* Just set cnt to 1 on success */
+		} else {
+			cnt = transport_send(p->trp, &p->fda, TRANS_GENERAL, msg);
+		}
 		if (cnt <= 0) {
 			pr_err("tc failed to forward message on %s",
 			       p->log_name);
