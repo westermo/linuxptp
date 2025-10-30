@@ -3315,7 +3315,10 @@ int port_management_error(struct PortIdentity pid, struct port *ingress,
 	mes->error = error_id;
 	mes->id = mgt->id;
 
-	err = port_prepare_and_send(ingress, msg, TRANS_GENERAL);
+	if (port_is_red(ingress))
+		err = red_prepare_and_send(ingress, msg, TRANS_GENERAL);
+	else
+		err = port_prepare_and_send(ingress, msg, TRANS_GENERAL);
 	msg_put(msg);
 	return err;
 }

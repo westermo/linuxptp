@@ -650,8 +650,12 @@ int clock_management_get_response(struct clock *c, struct port *p,
 		return 0;
 	}
 	respond = clock_management_fill_response(c, p, req, rsp, id);
-	if (respond)
-		port_prepare_and_send(p, rsp, TRANS_GENERAL);
+	if (respond) {
+		if (port_is_red(p))
+			red_prepare_and_send(p, rsp, TRANS_GENERAL);
+		else
+			port_prepare_and_send(p, rsp, TRANS_GENERAL);
+	}
 	msg_put(rsp);
 	return respond;
 }
