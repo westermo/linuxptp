@@ -456,7 +456,6 @@ static int forwarding(struct clock *c, struct port *p)
 int tc_manage(struct port *q, struct ptp_message *msg)
 {
 	struct port *p;
-	int cnt;
 	int pdulen;
 
 	if (forwarding(q->clock, q) && msg->management.boundaryHops) {
@@ -475,11 +474,7 @@ int tc_manage(struct port *q, struct ptp_message *msg)
 		case RESPONSE:
 		case ACKNOWLEDGE:
 			msg_pre_send(msg);
-			cnt = transport_send(p->trp, &p->fda, TRANS_GENERAL, msg);
-			if (cnt <= 0)
-				pr_err("tc failed to forward message to uds port");
-			else
-				pr_err("response processed");
+			transport_send(p->trp, &p->fda, TRANS_GENERAL, msg);
 			msg_post_recv(msg, pdulen);
 		}
 	}
