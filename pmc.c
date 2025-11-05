@@ -976,6 +976,9 @@ int main(int argc, char *argv[])
 	transport_specific = config_get_int(cfg, NULL, "transportSpecific") << 4;
 	domain_number = config_get_int(cfg, NULL, "domainNumber");
 
+	ptp_hdr_ver = config_get_int(cfg, NULL, "ptp_minor_version");
+	ptp_hdr_ver = (ptp_hdr_ver << 4) | PTP_MAJOR_VERSION;
+
 	if (!iface_name) {
 		if (transport_type == TRANS_UDS) {
 			snprintf(uds_local, sizeof(uds_local),

@@ -23,6 +23,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "msg.h"
 #include "notification.h"
 #include "print.h"
 #include "tlv.h"
@@ -569,7 +570,7 @@ static struct ptp_message *pmc_message(struct pmc *pmc, uint8_t action)
 	msg->hwts.type = TS_SOFTWARE;
 
 	msg->header.tsmt               = MANAGEMENT | pmc->transport_specific;
-	msg->header.ver                = PTP_VERSION;
+	msg->header.ver                = ptp_hdr_ver;
 	msg->header.messageLength      = pdulen;
 	msg->header.domainNumber       = pmc->domain_number;
 	msg->header.sourcePortIdentity = pmc->port_identity;
